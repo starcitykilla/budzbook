@@ -1,0 +1,49 @@
+{# Shared post card. Expects `post` dict with like_count, comment_count,
+   liked, comments, username, display_name, avatar_approved; and `user`. #}
+<article class="post" id="post-{{ post.id }}">
+  <div class="post-head">
+    {% if post.avatar_approved %}
+      <img class="avatar sm {{ post.equipped_frame }}" src="/media/avatars/{{ post.username }}.jpg" alt="">
+    {% else %}
+      <span class="avatar sm fallback {{ post.equipped_frame }}">{{ post.display_name[0]|upper }}</span>
+    {% endif %}
+    <div>
+      <a class="who" href="/u/{{ post.username }}">{{ post.display_name }}</a>
+      <span class="uname">@{{ post.username }}</span>
+      {% if post.kind == 'grow' %}<span class="tag">🌱 grow</span>{% endif %}
+      <div class="when">{{ post.created_at|fdt }}</div>
+    </div>
+  </div>
+  <p class="post-body">{{ post.body }}</p>
+  {% if post.image_path %}
+    <img class="post-img" src="/media/{{ post.image_path }}" alt="post image" loading="lazy">
+  {% endif %}
+  <div class="post-actions">
+    <form method="post" action="/post/{{ post.id }}/like">
+      <button class="pill {% if post.liked %}on{% endif %}" type="submit">
+        {% if post.liked %}💚{% else %}🤍{% endif %} {{ post.like_count }}
+      </button>
+    </form>
+    <span class="pill ghost">💬 {{ post.comment_count }}</span>
+    {% if post.user_id == user.id or user.is_admin %}
+      <form method="post" action="/post/{{ post.id }}/delete"
+            onsubmit="return confirm('Delete this post?')">
+        <button class="pill danger" type="submit">🗑</button>
+      </form>
+    {% elif post.user_id != user.id %}
+      <form method="post" action="/post/{{ post.id }}/report">
+        <button class="pill warn" type="submit" title="Report to mods">⚠️</button>
+      </form>
+    {% endif %}
+  </div>
+  <div class="comments">
+    {% for c in post.comments %}
+      <div class="comment"><b>{{ c.display_name }}</b> <span class="uname">@{{ c.username }}</span>
+        {{ c.body }}</div>
+    {% endfor %}
+    <form class="comment-form" method="post" action="/post/{{ post.id }}/comment">
+      <input name="body" maxlength="500" placeholder="Write a comment…" required>
+      <button class="btn sm" type="submit">Reply</button>
+    </form>
+  </div>
+</article>

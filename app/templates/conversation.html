@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}DM with {{ peer.display_name }}{% endblock %}
+{% block content %}
+<h2><a href="/messages">✉️</a> {{ peer.display_name }} <span class="uname">@{{ peer.username }}</span></h2>
+<div class="card">
+  <div id="conv" data-peer="{{ peer.username }}" data-last="{{ last_id }}">
+    {% for m in messages %}
+      <div class="dm {% if m.sender_id == user.id %}me{% else %}them{% endif %}" data-id="{{ m.id }}">
+        <div class="dm-body">{{ m.body }}</div>
+        <div class="dm-when">{{ m.created_at|fdt }}</div>
+      </div>
+    {% endfor %}
+  </div>
+  <form class="dm-form" method="post" action="/messages/{{ peer.username }}/send">
+    <input name="body" maxlength="1000" placeholder="Message {{ peer.display_name }}…" required autocomplete="off">
+    <button class="btn" type="submit">Send</button>
+  </form>
+  <p class="muted small">Messages refresh automatically every few seconds.</p>
+</div>
+{% endblock %}

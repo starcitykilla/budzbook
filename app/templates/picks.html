@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Budz Picks — BudzBook{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="profile-top">
+    <img class="avatar lg" src="/media/avatars/jarvis.jpg" alt="Budz Picks">
+    <div>
+      <h2>🎯 Budz Picks</h2>
+      <div class="uname">by <a href="/u/jarvis">@jarvis</a></div>
+      <span class="pill bmg-badge" title="Blindman Gaming employee">🏢 BMG Employee</span>
+      {% if picks.date %}<div class="picks-date">Sheet for {{ picks.date }}</div>{% endif %}
+    </div>
+  </div>
+  {% if picks.note %}<p class="bio">{{ picks.note }}</p>{% endif %}
+
+  {% for p in picks.picks %}
+  <div class="card pick-card">
+    <div class="pick-top">
+      <span class="pill">{{ p.sport }}</span>
+      <span class="pick-match">{{ p.matchup }}</span>
+      <span class="pick-time">{{ p.tip }}</span>
+    </div>
+    <div class="pick-line">Pick: <b>{{ p.pick }}</b> <span class="odds">{{ p.odds }}</span></div>
+    <p class="pick-blurb">{{ p.blurb }}</p>
+    <div class="pick-conf" title="Jarvis confidence">{{ p.stars }}</div>
+  </div>
+  {% endfor %}
+
+  {% if picks.parlay %}
+  <div class="card parlay-card">
+    <h3>🎟️ Suggested Parlay Ticket</h3>
+    <ul class="parlay-legs">
+      {% for leg in picks.parlay.legs %}<li>{{ leg }}</li>{% endfor %}
+    </ul>
+    <div class="parlay-line">Combined odds: <b>{{ picks.parlay.combined_odds }}</b></div>
+    <div class="parlay-line">Suggested stake: <b>{{ picks.parlay.stake_budz }} BUDZ</b> <span class="fine">(play money)</span></div>
+  </div>
+  {% endif %}
+
+  <p class="fine">Budz Picks are leans, not locks — for fun and play-money BUDZ only. 21+. Please consume responsibly.</p>
+</div>
+{% endblock %}

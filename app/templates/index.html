@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}BudzBook — T.H.C. stream community{% endblock %}
+{% block content %}
+<div class="hero">
+  <div class="hero-leaf">🌿</div>
+  <h1>BudzBook<span class="age21">21+</span></h1>
+  <p class="sub">The home base for Budz's stream community — hang out between
+  streams, talk shop, check the casino leaderboard, peek the Budz Book lines,
+  and share your grow.</p>
+  <div class="jarvis-stage" id="jarvis-stage">
+    <div class="jarvis-tag">[Jarvis] on duty — tap me 👋</div>
+  </div>
+  <script type="importmap">
+  {"imports":{
+    "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }}
+  </script>
+  <script type="module" src="/static/js/jarvis.js"></script>
+  <div class="cta-row">
+    <a class="btn big" href="/register">Create a BudzBook account</a>
+    <a class="btn big ghost" href="/login">Log in</a>
+  </div>
+  <div class="hero-cards">
+    <div class="hcard">💬<b>Feed</b><span>Posts, likes, comments</span></div>
+    <div class="hcard">🏆<b>Casino</b><span>Budz leaderboard</span></div>
+    <div class="hcard">📖<b>Budz Book</b><span>Sportsbook lines</span></div>
+    <div class="hcard">🌱<b>Grow</b><span>Journal your plants</span></div>
+  </div>
+</div>
+{% endblock %}

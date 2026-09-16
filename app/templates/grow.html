@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Grow Journal — BudzBook{% endblock %}
+{% block content %}
+<h2>🌱 Grow Journal</h2>
+<div class="card tent">
+  <h3>Budz's tent <span class="muted">· {{ stats.strain }} · day {{ stats.day }}</span></h3>
+  <div class="stats">
+    <div><b>{{ stats.temp_f }}°F</b><span>temp</span></div>
+    <div><b>{{ stats.humidity }}%</b><span>humidity</span></div>
+    <div><b>{{ stats.light_cycle }}</b><span>light</span></div>
+  </div>
+  {% if mock %}<p class="muted small">{{ stats.note }}</p>{% endif %}
+</div>
+<div class="composer card">
+  <form method="post" action="/post" enctype="multipart/form-data" class="form">
+    <input type="hidden" name="kind" value="grow">
+    <textarea name="body" maxlength="280" rows="2" required
+      placeholder="Grow update — how are the ladies doing? 🌱"></textarea>
+    <div class="row">
+      <label class="filebtn">📷 <input type="file" name="image" accept="image/*" hidden></label>
+      <button class="btn" type="submit">Post update</button>
+    </div>
+  </form>
+</div>
+{% for post in posts %}
+  {% include "_post.html" %}
+{% else %}
+  <div class="card muted">No grow updates yet — show us your garden. 🌿</div>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>BudzBook Score Ticker</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background:#0a0f0c; color:#e9f2ec; overflow:hidden;
+  }
+  .ticker { display:flex; align-items:stretch; height:64px; }
+  .brand {
+    display:flex; align-items:center; padding:0 18px; flex:0 0 auto;
+    background:#0d1512; border-right:3px solid #e8c547;
+    font-weight:800; font-size:20px; letter-spacing:1px; color:#3ddc84; z-index:2;
+    white-space:nowrap;
+  }
+  .brand small { color:#e8c547; }
+  .viewport { flex:1; overflow:hidden; display:flex; align-items:center; }
+  .track { display:flex; align-items:center; white-space:nowrap;
+           animation:scroll 70s linear infinite; will-change:transform; }
+  .track.static { animation:none; }
+  @keyframes scroll { from { transform:translateX(0); } to { transform:translateX(-50%); } }
+  .item { display:inline-flex; align-items:center; gap:8px; padding:0 26px;
+          font-size:19px; font-weight:600; }
+  .item .abbr { font-weight:800; }
+  .item .score { color:#e8c547; font-weight:800; }
+  .item .meta { font-size:13px; color:#8fa89a; font-weight:600; }
+  .item .live { color:#ff5a5a; font-weight:800; font-size:13px; }
+  .item .lg { font-size:11px; font-weight:800; color:#0a0f0c; background:#3ddc84;
+              border-radius:4px; padding:2px 6px; letter-spacing:1px; }
+  .sep { color:#24382d; font-size:12px; }
+</style>
+</head>
+<body>
+<div class="ticker">
+  <div class="brand">???? BUDZBOOK<small>.US</small></div>
+  <div class="viewport"><div class="track" id="track"></div></div>
+</div>
+<script>
+async function load() {
+  try {
+    const r = await fetch('/ticker.json', {cache:'no-store'});
+    const games = await r.json();
+    const track = document.getElementById('track');
+    if (!games.length) {
+      track.classList.add('static');
+      track.innerHTML = '<span class="item"><span class="lg">????</span><span class="meta">SCORES UPDATE SOON</span></span>';
+      return;
+    }
+    track.classList.remove('static');
+    const half = games.map(itemHTML).join('<span class="sep">???</span>');
+    track.innerHTML = half + '<span class="sep">???</span>' + half + '<span class="sep">???</span>';
+  } catch(e) {}
+}
+function itemHTML(g) {
+  const lg = esc(g.league || 'NFL');
+  let meta;
+  if (g.state === 'in') {
+    const where = (g.league === 'MLB') ? esc(g.clock) : qtr(g) + ' ' + esc(g.clock);
+    meta = '<span class="live">??? LIVE</span> <span class="meta">' + where + '</span>';
+  }
+  else if (g.state === 'post') meta = '<span class="meta">FINAL</span>';
+  else meta = '<span class="meta">' + esc(preDate(g.date)) + '</span>';
+  return '<span class="item"><span class="lg">' + lg + '</span><span class="abbr">' + esc(g.away.abbr) + '</span> <span class="score">' + g.away.score +
+    '</span><span class="meta">@</span><span class="abbr">' + esc(g.home.abbr) + '</span> <span class="score">' + g.home.score +
+    '</span>' + meta + '</span>';
+}
+function qtr(g){ return g.period > 4 ? 'OT' : 'Q' + g.period; }
+function preDate(d){ try { const t = new Date(d); return t.toLocaleDateString('en-US',{weekday:'short'}) + ' ' + t.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}); } catch(e){ return ''; } }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+load(); setInterval(load, 60000);
+</script>
+</body>
+</html>

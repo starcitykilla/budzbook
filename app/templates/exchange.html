@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Exchange — BudzBook{% endblock %}
+{% block content %}
+<h2>🔄 Currency Exchange</h2>
+<p class="muted">Swap between streamer currencies at fixed rates.
+{{ fee_pct }}% house fee on every swap — the house always wins a little. 😏</p>
+
+<div class="card narrow">
+  <form class="form" method="post" action="/exchange">
+    <label>From
+      <select name="from_code">
+        {% for c in currencies %}
+          <option value="{{ c.code }}">{{ c.icon }} {{ c.code }} — {{ c.name }}</option>
+        {% endfor %}
+      </select></label>
+    <label>To
+      <select name="to_code">
+        {% for c in currencies %}
+          <option value="{{ c.code }}">{{ c.icon }} {{ c.code }} — {{ c.name }}</option>
+        {% endfor %}
+      </select></label>
+    <label>Amount<input name="amount" inputmode="numeric" placeholder="100" required></label>
+    <button class="btn big" type="submit">Swap</button>
+  </form>
+</div>
+
+<h3>Rates <span class="muted small">(vs Budz)</span></h3>
+{% for c in currencies %}
+  <div class="card wallet-row">
+    <div>{{ c.icon }} <b>{{ c.code }}</b> <span class="muted">{{ c.name }}</span>
+      {% if c.owner %}<div class="muted small">{{ c.owner }}</div>{% endif %}</div>
+    <div class="wallet-bal">{{ c.rate_to_base }}</div>
+  </div>
+{% endfor %}
+
+<h3>Your balances</h3>
+{% for w in wallets %}
+  <div class="txn"><span>{{ w.icon }} <b>{{ w.code }}</b></span>
+    <span class="wallet-bal">{{ w.balance }}</span></div>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Casino Leaderboard — BudzBook{% endblock %}
+{% block content %}
+<h2>🏆 Casino Leaderboard</h2>
+{% if mock %}<div class="notice">Demo data — this will read Brad's real casino once the adapter is wired up.</div>{% endif %}
+<div class="card">
+<table class="board">
+  <tr><th>#</th><th>Player</th><th>Budz</th><th>Wins</th></tr>
+  {% for p in board %}
+  <tr class="{% if loop.index <= 3 %}top{% endif %}">
+    <td>{{ loop.index }}</td><td><b>{{ p.username }}</b></td>
+    <td>{{ p.budz }}</td><td>{{ p.wins }}</td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+<p class="muted">Virtual currency only — Budz have no cash value. Play along in Brad's Twitch chat.</p>
+{% endblock %}

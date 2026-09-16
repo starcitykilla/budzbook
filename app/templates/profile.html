@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}@{{ profile.username }} — BudzBook{% endblock %}
+{% block content %}
+<div class="card profile-card">
+  <div class="profile-top">
+    {% if profile.avatar_3d_url %}
+      <div class="avatar3d {{ profile.equipped_frame }}" data-url="{{ profile.avatar_3d_url }}"
+        title="Drag to spin it · scroll to zoom · click for a hop"></div>
+    {% elif profile.avatar_approved %}
+      <img class="avatar lg {{ profile.equipped_frame }}" src="/media/avatars/{{ profile.username }}.jpg" alt="">
+    {% else %}
+      <span class="avatar lg fallback {{ profile.equipped_frame }}">{{ profile.display_name[0]|upper }}</span>
+    {% endif %}
+    <div>
+      <h2>{{ profile.display_name }}</h2>
+      {% if profile.badge == 'bmg' %}<span class="pill bmg-badge" title="Blindman Gaming employee">🏢 BMG Employee</span>{% endif %}{% if profile.badge == 'bmg_vip' %}<span class="pill bmg-vip-badge" title="BMG VIP">&#9733; BMG VIP</span>{% endif %}
+      <div class="uname">@{{ profile.username }}</div>
+      {% if profile.twitch_username %}
+        <div class="twitch">🟣 twitch.tv/{{ profile.twitch_username }}</div>
+      {% endif %}
+      {% if gear %}
+        <div class="gear-row">
+          {% for g in gear %}<span class="pill">{{ g.icon }} {{ g.name }}</span>{% endfor %}
+        </div>
+      {% endif %}
+    </div>
+    {% if user and user.id != profile.id %}
+      <div class="profile-act">
+        {% if profile.is_following %}
+          <form method="post" action="/u/{{ profile.username }}/unfollow">
+            <button class="btn ghost" type="submit">Unfollow</button></form>
+        {% else %}
+          <form method="post" action="/u/{{ profile.username }}/follow">
+            <button class="btn" type="submit">Follow</button></form>
+        {% endif %}
+        <a class="btn ghost" href="/messages/{{ profile.username }}">✉️ DM</a>
+      </div>
+    {% elif user %}
+      <div class="profile-act"><a class="btn ghost" href="/settings">Edit profile</a></div>
+    {% endif %}
+  </div>
+  {% if profile.bio %}<p class="bio">{{ profile.bio }}</p>{% endif %}
+  <div class="counts">
+    <a href="/u/{{ profile.username }}/followers"><b>{{ profile.follower_count }}</b> followers</a>
+    <a href="/u/{{ profile.username }}/following"><b>{{ profile.following_count }}</b> following</a>
+  </div>
+  {% if user and user.id == profile.id and profile.has_avatar and not profile.avatar_approved %}
+    <div class="notice">Your avatar is uploaded and <b>pending mod approval</b> before it can appear on stream. 🌿</div>
+  {% endif %}
+</div>
+<h3>Posts</h3>
+{% for post in posts %}
+  {% include "_post.html" %}
+{% else %}
+  <div class="card muted">No posts yet.</div>
+{% endfor %}
+<script type="importmap">
+{"imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module" src="/static/js/avatar3d.js"></script>
+{% endblock %}

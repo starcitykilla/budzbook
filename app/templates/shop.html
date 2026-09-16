@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Shop — BudzBook{% endblock %}
+{% block content %}
+<h2>🛍️ BudzBook Shop</h2>
+<p class="muted">Spend your game currency on frames, badges, and avatar gear.
+Frames go straight on your avatar, and gear shows on your profile. You can also
+buy gear right in Twitch chat with <code>$buy</code>. Flex responsibly. 💎</p>
+
+<h3>Your balances</h3>
+<div class="row" style="margin-bottom:12px">
+  {% for w in wallets %}
+    <span class="pill">{{ w.icon }} <b>{{ w.balance }}</b> {{ w.code }}</span>
+  {% endfor %}
+</div>
+
+{% for item in items %}
+  <div class="card person">
+    <span style="font-size:32px">{{ item.icon }}</span>
+    <div style="flex:1"><b>{{ item.name }}</b> <span class="tag">{{ item.kind }}</span>
+      {% if item.kind == 'frame' %}
+        <div class="muted small">Avatar frame — equips on purchase</div>
+      {% elif item.kind == 'gear' %}
+        <div class="muted small">Avatar gear — equips on purchase, shows on your profile</div>
+      {% endif %}</div>
+    <div style="text-align:right">
+      <div><b>{{ item.price }}</b> {{ item.currency_icon }}{{ item.currency_code }}</div>
+      {% if item.id in owned %}
+        <span class="muted small">✅ owned</span>
+      {% else %}
+        <form method="post" action="/shop/buy/{{ item.id }}">
+          <button class="btn sm" type="submit">Buy</button></form>
+      {% endif %}
+    </div>
+  </div>
+{% else %}
+  <div class="card muted">The shop is empty — check back soon.</div>
+{% endfor %}
+{% endblock %}

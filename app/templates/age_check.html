@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Age check — BudzBook</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="wrap">
+  <div class="card narrow center agegate">
+    <div class="age-leaf">🌿</div>
+    <h1>BudzBook</h1>
+    {% if denied %}
+      <p class="age-denied">Sorry friend — BudzBook is a <b>21+</b> cannabis
+      community. Come back and see us when you're of age. 💚</p>
+      <p class="muted small">No hard feelings. The door stays green for you.</p>
+    {% else %}
+      <p class="age-sub">This is a <b>21+ cannabis community</b> — home of Budz's
+      stream crew, the Budz Book, and the grow journals.</p>
+      <p class="muted">Please enter your date of birth to come inside.</p>
+      {% if error %}<div class="flash">{{ error }}</div>{% endif %}
+      <form class="form" method="post" action="/age-check">
+        <div class="dob-row">
+          <label>Month<input name="month" inputmode="numeric" placeholder="MM"
+                 maxlength="2" required></label>
+          <label>Day<input name="day" inputmode="numeric" placeholder="DD"
+                 maxlength="2" required></label>
+          <label>Year<input name="year" inputmode="numeric" placeholder="YYYY"
+                 maxlength="4" required></label>
+        </div>
+        <button class="btn big" type="submit">I'm 21 or older — let me in 🍃</button>
+      </form>
+      <p class="muted small age-note">You only have to do this once on this device.
+      Please consume responsibly and know your local laws.</p>
+    {% endif %}
+  </div>
+</main>
+</body>
+</html>

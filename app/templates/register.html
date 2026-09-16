@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Join — BudzBook{% endblock %}
+{% block content %}
+<div class="card narrow">
+  <h2>Create your BudzBook account 🌿</h2>
+  <form method="post" action="/register" class="form">
+    <label>Username <input name="username" required pattern="[A-Za-z0-9_]{3,20}"
+      placeholder="3-20 chars, letters/numbers/_"></label>
+    <label>Display name <input name="display_name" maxlength="60" placeholder="How your name shows up"></label>
+    <label>Twitch username <input name="twitch_username" maxlength="40" placeholder="links you to stream overlays"></label>
+    <label>Password <input type="password" name="password" required minlength="6"></label>
+    <button class="btn big" type="submit">Create account</button>
+  </form>
+  {% if twitch_configured %}
+  <div class="divider"><span>or</span></div>
+  <a class="btn big twitch" href="/auth/twitch">Continue with Twitch</a>
+  {% endif %}
+  <p class="muted">Already have a BudzBook account? <a href="/login">Log in</a></p>
+</div>
+{% endblock %}

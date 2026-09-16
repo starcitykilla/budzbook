@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Feed — BudzBook{% endblock %}
+{% block content %}
+<div class="composer card">
+  <form method="post" action="/post" enctype="multipart/form-data" class="form">
+    <textarea name="body" maxlength="280" rows="3" required
+      placeholder="What's good, {{ user.display_name }}? (280 chars)"></textarea>
+    <div class="row">
+      <label class="filebtn">📷 <input type="file" name="image" accept="image/*" hidden></label>
+      <span class="muted" id="filelabel"></span>
+      <button class="btn" type="submit">Post</button>
+    </div>
+  </form>
+</div>
+<div class="tabs">
+  <a class="{% if filter == 'all' %}on{% endif %}" href="/feed?filter=all">Everyone</a>
+  <a class="{% if filter == 'following' %}on{% endif %}" href="/feed?filter=following">Following</a>
+</div>
+{% for post in posts %}
+  {% include "_post.html" %}
+{% else %}
+  <div class="card muted">Nothing here yet — be the first to post. 🌿</div>
+{% endfor %}
+{% if has_more %}
+  <div class="center"><a class="btn ghost" href="/feed?filter={{ filter }}&page={{ page + 1 }}">Load more</a></div>
+{% endif %}
+{% endblock %}

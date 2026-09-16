@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Settings — BudzBook{% endblock %}
+{% block content %}
+<div class="card narrow">
+  <h2>Profile settings</h2>
+  <form method="post" action="/settings" enctype="multipart/form-data" class="form">
+    <label>Display name <input name="display_name" maxlength="60" value="{{ user.display_name }}"></label>
+    <label>Bio <textarea name="bio" maxlength="300" rows="3">{{ user.bio }}</textarea></label>
+    {% if user.twitch_verified %}
+    <div class="twitch-linked">✅ Twitch linked: <strong>@{{ user.twitch_username }}</strong>
+      <a href="/auth/twitch">re-link</a></div>
+    <input type="hidden" name="twitch_username" value="{{ user.twitch_username }}">
+    {% else %}
+    <label>Twitch username <input name="twitch_username" maxlength="40" value="{{ user.twitch_username }}"
+      placeholder="so the stream bot can find you"></label>
+    <p class="muted"><a href="/auth/twitch">Link your Twitch account</a> to verify your identity for wallet payouts.</p>
+    {% endif %}
+    <label>Avatar (square JPG/PNG, shown on stream after mod approval)
+      <input type="file" name="avatar" accept="image/jpeg,image/png"></label>
+    {% if has_avatar %}
+      <div class="row">
+        <img class="avatar lg" src="/media/avatars/{{ user.username }}.jpg" alt="current avatar">
+        <span class="muted">{% if user.avatar_approved %}✅ approved for stream{% else %}⏳ pending mod approval{% endif %}</span>
+      </div>
+    {% endif %}
+    <button class="btn big" type="submit">Save</button>
+  </form>
+  <hr class="sep">
+  <h3>3D avatar</h3>
+  {% if user.avatar_3d_url %}
+    <p class="muted">✅ 3D avatar saved — it shows on your profile and the <a href="/crew">3D Crew</a> page.</p>
+    <button class="btn" id="rpm-open" type="button">Make a new 3D avatar</button>
+  {% else %}
+    <p class="muted">Create a 3D avatar that you can spin around — it shows on your profile and the <a href="/crew">3D Crew</a> page.</p>
+    <button class="btn" id="rpm-open" type="button">Create your 3D avatar</button>
+  {% endif %}
+  <div class="rpm-modal" id="rpm-modal" hidden>
+    <div class="rpm-modal-head">
+      <span>Create your 3D avatar</span>
+      <button class="btn ghost sm" id="rpm-close" type="button">✕ Close</button>
+    </div>
+    <iframe id="rpm-frame" title="Ready Player Me avatar creator"
+      src="https://{{ rpm_subdomain }}.readyplayer.me/avatar?frameApi"></iframe>
+  </div>
+  <p class="muted">Avatars are square-cropped to 512px. A mod approves them before
+  they can appear on Brad's stream overlays.</p>
+  <hr class="sep">
+  <h3>🧢 Your gear</h3>
+  {% set gear_items = inventory | selectattr("kind", "equalto", "gear") | list %}
+  {% if gear_items %}
+    <p class="muted">Bought with Budz in the <a href="/shop">shop</a> or right in Twitch chat with <code>$buy</code>. Tap to wear it — one hat and one jersey at a time.</p>
+    {% for item in gear_items %}
+      <div class="card person">
+        <span style="font-size:28px">{{ item.icon }}</span>
+        <div style="flex:1"><b>{{ item.name }}</b> <span class="tag">{{ item.slot }}</span>
+          {% if item.equipped %}<span class="muted small"> · wearing it</span>{% endif %}</div>
+        <form method="post" action="/inventory/equip/{{ item.id }}">
+          <button class="btn sm{% if not item.equipped %} ghost{% endif %}" type="submit">{{ "Unequip" if item.equipped else "Equip" }}</button>
+        </form>
+      </div>
+    {% endfor %}
+  {% else %}
+    <p class="muted">No gear yet — grab a fitted or a jersey in the <a href="/shop">shop</a> or with <code>$buy</code> in chat.</p>
+  {% endif %}
+</div>
+<script>
+(function () {
+  var modal = document.getElementById("rpm-modal");
+  var frame = document.getElementById("rpm-frame");
+  document.getElementById("rpm-open").addEventListener("click", function () {
+    modal.hidden = false;
+    document.body.style.overflow = "hidden";
+  });
+  document.getElementById("rpm-close").addEventListener("click", function () {
+    modal.hidden = true;
+    document.body.style.overflow = "";
+  });
+  window.addEventListener("message", function (event) {
+    var origin = event.origin || "";
+    if (origin.slice(-16) !== ".readyplayer.me" && origin !== "https://readyplayer.me") return;
+    var data;
+    try { data = JSON.parse(event.data); } catch (e) { return; }
+    if (!data || data.source !== "readyplayerme") return;
+    if (data.eventName === "v1.frame.ready") {
+      frame.contentWindow.postMessage(JSON.stringify({
+        target: "readyplayerme", type: "subscribe", eventName: "v1.**"
+      }), "*");
+    } else if (data.eventName === "v1.avatar.exported") {
+      var url = data.data && data.data.url;
+      if (!url) return;
+      fetch("/settings/avatar3d", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "avatar_url=" + encodeURIComponent(url)
+      }).then(function () {
+        modal.hidden = true;
+        document.body.style.overflow = "";
+        location.reload();
+      });
+    }
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Mod tools — BudzBook{% endblock %}
+{% block content %}
+<h2>🛡️ Mod tools</h2>
+
+<h3>Game currencies</h3>
+<div class="card">
+  {% for c in currencies %}
+    <div class="row" style="justify-content:space-between; margin-bottom:6px">
+      <span>{{ c.icon }} <b>{{ c.code }}</b> {{ c.name }}
+        {% if c.owner %}<span class="muted small">· {{ c.owner }}</span>{% endif %}
+        {% if c.is_base %}<span class="tag">base</span>{% endif %}</span>
+      <span class="muted small">1 {{ c.code }} = {{ c.rate_to_base }} base</span>
+    </div>
+  {% else %}
+    <div class="muted">No currencies yet.</div>
+  {% endfor %}
+</div>
+<div class="row">
+  <div class="card" style="flex:1; min-width:240px">
+    <b>Register streamer currency</b>
+    <form class="form" method="post" action="/admin/currency/create" style="margin-top:8px">
+      <label>Code (2-8 letters)<input name="code" maxlength="8" required></label>
+      <label>Name<input name="name" maxlength="40" required></label>
+      <label>Streamer<input name="owner" maxlength="40" placeholder="twitch username"></label>
+      <label>Icon<input name="icon" maxlength="8" value="🪙"></label>
+      <label>Rate vs Budz (1 CODE = ? Budz)<input name="rate_to_base" value="1.0" required></label>
+      <button class="btn sm" type="submit">Create currency</button>
+    </form>
+  </div>
+  <div class="card" style="flex:1; min-width:240px">
+    <b>Grant currency</b>
+    <form class="form" method="post" action="/admin/currency/grant" style="margin-top:8px">
+      <label>Username<input name="username" required></label>
+      <label>Currency code<input name="code" maxlength="8" required></label>
+      <label>Amount<input name="amount" inputmode="numeric" required></label>
+      <button class="btn sm" type="submit">Grant</button>
+    </form>
+  </div>
+</div>
+
+<h3>Avatar approvals <span class="muted">({{ pending_avatars|length }} pending)</span></h3>
+<p class="muted">Approved avatars become eligible for Brad's stream overlays and the
+<code>/api/stream/avatars</code> feed.</p>
+{% for p in pending_avatars %}
+  <div class="card person">
+    <img class="avatar" src="/media/avatars/{{ p.username }}.jpg" alt="">
+    <div><b>{{ p.display_name }}</b> <span class="uname">@{{ p.username }}</span>
+      {% if p.twitch_username %}<div class="twitch">🟣 {{ p.twitch_username }}</div>{% endif %}</div>
+    <div class="row">
+      <form method="post" action="/admin/avatar/{{ p.username }}/approve">
+        <button class="btn sm" type="submit">✅ Approve</button></form>
+      <form method="post" action="/admin/avatar/{{ p.username }}/reject"
+            onsubmit="return confirm('Reject and delete this avatar?')">
+        <button class="btn sm danger" type="submit">✖ Reject</button></form>
+    </div>
+  </div>
+{% else %}
+  <div class="card muted">No avatars waiting. 🎉</div>
+{% endfor %}
+
+<h3>Reports <span class="muted">({{ reports|length }} open)</span></h3>
+{% for r in reports %}
+  <div class="card">
+    <div class="muted small">Reported by <b>@{{ r.reporter }}</b> · {{ r.created_at|fdt }}
+      {% if r.reason %}· “{{ r.reason }}”{% endif %}</div>
+    <div class="report-post"><b>@{{ r.post_author }}:</b> {{ r.post_body }}</div>
+    {% if r.image_path %}<img class="post-img" src="/media/{{ r.image_path }}" loading="lazy">{% endif %}
+    <div class="row">
+      <form method="post" action="/admin/reports/{{ r.id }}/resolve">
+        <input type="hidden" name="action" value="delete">
+        <button class="btn sm danger" type="submit"
+          onsubmit="return confirm('Delete this post?')">🗑 Delete post</button></form>
+      <form method="post" action="/admin/reports/{{ r.id }}/resolve">
+        <input type="hidden" name="action" value="dismiss">
+        <button class="btn sm ghost" type="submit">Dismiss</button></form>
+    </div>
+  </div>
+{% else %}
+  <div class="card muted">No open reports. 🎉</div>
+{% endfor %}
+{% endblock %}

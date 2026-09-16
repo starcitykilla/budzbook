@@ -1,0 +1,1169 @@
+"""BudzBook — companion social network for the T.H.C. stream community.
+
+Run:  pip install -r requirements.txt
+       uvicorn app.main:app        (from the project root)
+
+Route map (kept in one file on purpose so it's easy to read top to bottom):
+  Public:      /  /register  /login  /logout  /age-check
+               /manifest.webmanifest  (PWA install manifest)
+               /api/stream/avatars  /api/stream/avatar/<username>   (stream-PC sync)
+  Social:      /feed  /post  /post/<id>/like  /post/<id>/comment
+               /post/<id>/delete  /post/<id>/report
+               /u/<username>  /u/<username>/followers|following
+               /settings (profile + avatar upload)
+  DMs:         /messages  /messages/<username>  (polling, no websockets in v1)
+  THC tie-ins: /leaderboard  /sportsbook  /grow
+  Admin:       /admin  (reports + avatar approvals)
+
+Age gate: everything except /age-check, /static, /media and /api/stream/*
+requires a signed 21+ cookie (see the age_gate middleware below).
+"""
+import json
+import os
+import re
+import secrets
+import uuid
+from contextlib import asynccontextmanager
+from datetime import date, datetime, timezone
+
+from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from PIL import Image
+
+from . import thc_adapter
+from . import currency
+from . import ticker
+from .auth import (AGE_COOKIE, SESSION_COOKIE, hash_password, make_age_token,
+                   make_session_token, read_age_token, read_session_token,
+                   verify_password)
+from .db import (AVATAR_DIR, MEDIA_DIR, POST_IMG_DIR, avatar_exists,
+                 avatar_path_for, get_db, init_db)
+from .twitch_oauth import (authorize_url, configured as twitch_configured,
+                           exchange_code, fetch_twitch_user, make_state,
+                           read_state)
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,20}$")
+POST_MAX_LEN = 280
+FEED_PAGE_SIZE = 10
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+# Ready Player Me avatar-creator subdomain ("demo" works for testing;
+# set RPM_SUBDOMAIN to the BudzBook subdomain from Ready Player Me Studio).
+RPM_SUBDOMAIN = os.environ.get("RPM_SUBDOMAIN", "demo")
+RPM_MODEL_PREFIX = "https://models.readyplayer.me/"
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_db()
+    yield
+
+
+app = FastAPI(title="BudzBook", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "app", "static")), name="static")
+app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "app", "templates"))
+
+
+def _fmt_dt(iso: str) -> str:
+    try:
+        return datetime.fromisoformat(iso).strftime("%b %d, %I:%M %p")
+    except Exception:
+        return iso
+
+
+templates.env.filters["fdt"] = _fmt_dt
+
+
+# --------------------------------------------------------------------------
+# 21+ age gate — BudzBook is a cannabis community.
+# Everything except the gate page itself, static/media assets, and the
+# stream-PC sync API requires a signed age cookie.
+# --------------------------------------------------------------------------
+def _age_exempt(path: str) -> bool:
+    return (
+        path in ("/age-check", "/manifest.webmanifest", "/ticker", "/ticker.json", "/livelook", "/livelook.json")
+        or path.startswith(("/static/", "/media/", "/api/stream/"))
+    )
+
+
+@app.middleware("http")
+async def age_gate(request: Request, call_next):
+    if not _age_exempt(request.url.path):
+        if not read_age_token(request.cookies.get(AGE_COOKIE, "")):
+            return RedirectResponse("/age-check", status_code=303)
+    return await call_next(request)
+
+
+@app.get("/age-check")
+async def age_check_form(request: Request):
+    if read_age_token(request.cookies.get(AGE_COOKIE, "")):
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(request, "age_check.html", {"user": None})
+
+
+@app.post("/age-check")
+async def age_check_submit(request: Request,
+                           month: str = Form(...), day: str = Form(...),
+                           year: str = Form(...)):
+    def denied_page():
+        return templates.TemplateResponse(
+            request, "age_check.html", {"user": None, "denied": True},
+            status_code=403)
+
+    try:
+        dob = date(int(year), int(month), int(day))
+    except ValueError:
+        return templates.TemplateResponse(
+            request, "age_check.html",
+            {"user": None, "error": "That date doesn't look right — try again."},
+            status_code=400)
+    if dob > date.today():
+        return templates.TemplateResponse(
+            request, "age_check.html",
+            {"user": None, "error": "Birth date can't be in the future."},
+            status_code=400)
+    today = date.today()
+    age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+    if age < 21:
+        return denied_page()
+    resp = RedirectResponse("/", status_code=303)
+    resp.set_cookie(AGE_COOKIE, make_age_token(),
+                    max_age=365 * 24 * 3600, httponly=True, samesite="lax")
+    return resp
+
+
+# --------------------------------------------------------------------------
+# Auth helpers
+# --------------------------------------------------------------------------
+async def current_user(request: Request, db=Depends(get_db)):
+    """Return the logged-in user row, or None. Never raises."""
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        return None
+    uid = read_session_token(token)
+    if not uid:
+        return None
+    cur = await db.execute("SELECT * FROM users WHERE id = ?", (uid,))
+    return await cur.fetchone()
+
+
+def login_required(user):
+    if user is None:
+        return RedirectResponse("/login?msg=Please+log+in+first", status_code=303)
+    return None
+
+
+def admin_required(user):
+    if user is None or not user["is_admin"]:
+        return RedirectResponse("/?msg=Admins+only", status_code=303)
+    return None
+
+
+def _now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+# --------------------------------------------------------------------------
+# Avatars (upload -> mod approval -> stream sync)
+# --------------------------------------------------------------------------
+def process_avatar_upload(upload: UploadFile, username: str) -> None:
+    """Square-crop to max 512px and save as media/avatars/<username>.jpg.
+
+    Raises ValueError on bad input. The avatar is NOT stream-eligible until
+    a moderator approves it (avatar_approved = 1).
+    """
+    if upload.content_type not in ("image/jpeg", "image/png"):
+        raise ValueError("Avatar must be a JPG or PNG image.")
+    data = upload.file.read()
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise ValueError("Image is too large (5 MB max).")
+    try:
+        img = Image.open(__import__("io").BytesIO(data)).convert("RGB")
+    except Exception:
+        raise ValueError("Could not read that image file.")
+    w, h = img.size
+    side = min(w, h)
+    img = img.crop(((w - side) // 2, (h - side) // 2,
+                    (w + side) // 2, (h + side) // 2))
+    img.thumbnail((512, 512), Image.LANCZOS)
+    img.save(avatar_path_for(username), "JPEG", quality=88)
+
+
+# --------------------------------------------------------------------------
+# Public pages
+# --------------------------------------------------------------------------
+@app.get("/")
+async def index(request: Request, user=Depends(current_user), msg: str = ""):
+    if user:
+        return RedirectResponse("/feed", status_code=303)
+    return templates.TemplateResponse(request, "index.html", { "user": user, "msg": msg})
+
+
+@app.get("/register")
+async def register_form(request: Request, user=Depends(current_user), msg: str = ""):
+    if user:
+        return RedirectResponse("/feed", status_code=303)
+    return templates.TemplateResponse(request, "register.html", { "user": None, "msg": msg,
+        "twitch_configured": twitch_configured()})
+
+
+@app.post("/register")
+async def register(request: Request, db=Depends(get_db),
+                   username: str = Form(...), display_name: str = Form(""),
+                   password: str = Form(...), twitch_username: str = Form("")):
+    username = username.strip()
+    msg = None
+    if not USERNAME_RE.match(username):
+        msg = "Username must be 3-20 chars: letters, numbers, underscores."
+    elif len(password) < 6:
+        msg = "Password must be at least 6 characters."
+    else:
+        cur = await db.execute("SELECT id FROM users WHERE username = ?", (username,))
+        if await cur.fetchone():
+            msg = "That username is taken."
+    if msg:
+        return templates.TemplateResponse(request, "register.html", { "user": None, "msg": msg,
+            "twitch_configured": twitch_configured()},
+                                          status_code=400)
+    await db.execute(
+        "INSERT INTO users (username, display_name, password_hash, twitch_username, created_at)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (username, display_name.strip() or username, hash_password(password),
+         twitch_username.strip(), _now()))
+    await db.commit()
+    cur = await db.execute("SELECT * FROM users WHERE username = ?", (username,))
+    user = await cur.fetchone()
+    resp = RedirectResponse("/feed?msg=Welcome+to+BudzBook", status_code=303)
+    resp.set_cookie(SESSION_COOKIE, make_session_token(user["id"]), httponly=True, samesite="lax")
+    return resp
+
+
+@app.get("/login")
+async def login_form(request: Request, user=Depends(current_user), msg: str = ""):
+    if user:
+        return RedirectResponse("/feed", status_code=303)
+    return templates.TemplateResponse(request, "login.html", { "user": None, "msg": msg,
+        "twitch_configured": twitch_configured()})
+
+
+@app.post("/login")
+async def login(request: Request, db=Depends(get_db),
+                username: str = Form(...), password: str = Form(...)):
+    cur = await db.execute("SELECT * FROM users WHERE username = ?", (username.strip(),))
+    user = await cur.fetchone()
+    if not user or not verify_password(password, user["password_hash"]):
+        return templates.TemplateResponse(request, "login.html", { "user": None,
+                                           "msg": "Wrong username or password.",
+                                           "twitch_configured": twitch_configured()},
+                                          status_code=400)
+    resp = RedirectResponse("/feed", status_code=303)
+    resp.set_cookie(SESSION_COOKIE, make_session_token(user["id"]), httponly=True, samesite="lax")
+    return resp
+
+
+@app.post("/logout")
+async def logout():
+    resp = RedirectResponse("/?msg=Logged+out", status_code=303)
+    resp.delete_cookie(SESSION_COOKIE)
+    return resp
+
+
+# --------------------------------------------------------------------------
+# Twitch OAuth login ("Continue with Twitch")
+# --------------------------------------------------------------------------
+@app.get("/auth/twitch")
+async def twitch_login(request: Request, user=Depends(current_user)):
+    """Start the Twitch OAuth flow. Logged-in users link; logged-out users log in."""
+    if not twitch_configured():
+        return RedirectResponse("/login?msg=Twitch+login+isn't+set+up+yet",
+                                status_code=303)
+    redirect_uri = str(request.url_for("twitch_callback"))
+    state = make_state(link_uid=user["id"] if user else None)
+    return RedirectResponse(authorize_url(redirect_uri, state), status_code=303)
+
+
+@app.get("/auth/twitch/callback", name="twitch_callback")
+async def twitch_callback(request: Request, db=Depends(get_db),
+                          code: str = "", state: str = "", error: str = ""):
+    if error:
+        return RedirectResponse("/login?msg=Twitch+login+was+cancelled",
+                                status_code=303)
+    st = read_state(state) if state else None
+    if not st or not code or not twitch_configured():
+        return RedirectResponse("/login?msg=Twitch+login+failed", status_code=303)
+    redirect_uri = str(request.url_for("twitch_callback"))
+    try:
+        token = await exchange_code(code, redirect_uri)
+        tw = await fetch_twitch_user(token)
+    except Exception:
+        return RedirectResponse("/login?msg=Twitch+login+failed,+try+again",
+                                status_code=303)
+    twitch_id, login = str(tw["id"]), tw["login"]
+    display = tw.get("display_name") or login
+    avatar = tw.get("profile_image_url") or ""
+
+    # Link flow: user was already logged in — attach Twitch to their account.
+    if st.get("link_uid"):
+        cur = await db.execute(
+            "SELECT id FROM users WHERE twitch_id = ? AND id != ?",
+            (twitch_id, st["link_uid"]))
+        if await cur.fetchone():
+            return RedirectResponse(
+                "/settings?msg=That+Twitch+account+is+already+linked",
+                status_code=303)
+        await db.execute(
+            "UPDATE users SET twitch_id = ?, twitch_username = ?, "
+            "twitch_avatar = ?, twitch_verified = 1 WHERE id = ?",
+            (twitch_id, login, avatar, st["link_uid"]))
+        await db.commit()
+        return RedirectResponse("/settings?msg=Twitch+account+linked",
+                                status_code=303)
+
+    # Login flow: find by verified Twitch ID, else create an account.
+    cur = await db.execute("SELECT * FROM users WHERE twitch_id = ?",
+                           (twitch_id,))
+    user = await cur.fetchone()
+    if not user:
+        username = login
+        n = 0
+        while True:
+            cur = await db.execute("SELECT id FROM users WHERE username = ?",
+                                   (username,))
+            if not await cur.fetchone():
+                break
+            n += 1
+            username = f"{login}_{n}"
+        # OAuth accounts get an unusable random password; they log in via Twitch.
+        await db.execute(
+            "INSERT INTO users (username, display_name, password_hash, "
+            "twitch_username, twitch_id, twitch_avatar, twitch_verified, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
+            (username, display, hash_password("twitch-oauth:" + secrets.token_hex(16)),
+             login, twitch_id, avatar, _now()))
+        await db.commit()
+        cur = await db.execute("SELECT * FROM users WHERE twitch_id = ?",
+                               (twitch_id,))
+        user = await cur.fetchone()
+    else:
+        await db.execute(
+            "UPDATE users SET twitch_username = ?, twitch_avatar = ?, "
+            "twitch_verified = 1 WHERE id = ?",
+            (login, avatar, user["id"]))
+        await db.commit()
+    resp = RedirectResponse("/feed", status_code=303)
+    resp.set_cookie(SESSION_COOKIE, make_session_token(user["id"]),
+                    httponly=True, samesite="lax")
+    return resp
+
+
+# --------------------------------------------------------------------------
+# PWA install support (BudzBook as an installable app — no app store needed)
+# --------------------------------------------------------------------------
+@app.get("/manifest.webmanifest")
+async def pwa_manifest():
+    """Serve the web app manifest with the correct MIME type so browsers
+    offer 'Install app' / 'Add to Home Screen'."""
+    return FileResponse(
+        os.path.join(BASE_DIR, "app", "static", "manifest.webmanifest"),
+        media_type="application/manifest+json")
+
+
+# --------------------------------------------------------------------------
+# Stream-sync API (polled by the stream-PC bot for on-stream overlays)
+# --------------------------------------------------------------------------
+@app.get("/api/stream/avatars")
+async def stream_avatars(request: Request, db=Depends(get_db), key: str = "site"):
+    """{username: avatar_url} for APPROVED avatars only.
+
+    ?key=site   (default) keys by site username.
+    ?key=twitch keys by twitch_username (falls back to site username when unset)
+                so the bot can map chat chatters directly.
+    URLs are absolute so the bot can fetch without knowing the base URL.
+    Contract: the bot polls this every 5 minutes, caches locally, and only
+    re-downloads files whose URL it hasn't seen before.
+    """
+    cur = await db.execute(
+        "SELECT username, twitch_username FROM users WHERE avatar_approved = 1")
+    base = str(request.base_url).rstrip("/")
+    out = {}
+    for row in await cur.fetchall():
+        k = row["username"]
+        if key == "twitch":
+            k = row["twitch_username"] or row["username"]
+        out[k] = f"{base}/media/avatars/{row['username']}.jpg"
+    return JSONResponse(out)
+
+
+@app.get("/api/stream/avatar/{username}")
+async def stream_avatar(username: str, db=Depends(get_db)):
+    """Serve one approved avatar file (404 unless approved and present)."""
+    if not re.fullmatch(r"[A-Za-z0-9_]{3,20}", username or ""):
+        return JSONResponse({"error": "bad username"}, status_code=404)
+    cur = await db.execute(
+        "SELECT avatar_approved FROM users WHERE username = ?", (username,))
+    row = await cur.fetchone()
+    if not row or not row["avatar_approved"] or not avatar_exists(username):
+        return JSONResponse({"error": "no approved avatar"}, status_code=404)
+    return FileResponse(avatar_path_for(username), media_type="image/jpeg")
+
+
+# --------------------------------------------------------------------------
+# Feed / posts
+# --------------------------------------------------------------------------
+async def _post_rows(db, me_id, where="", args=(), limit=FEED_PAGE_SIZE, offset=0):
+    cur = await db.execute(
+        f"""SELECT p.*, u.username, u.display_name, u.avatar_approved, u.equipped_frame,
+                   (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count,
+                   (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id) AS comment_count,
+                   (SELECT COUNT(*) FROM likes l2 WHERE l2.post_id = p.id AND l2.user_id = ?) AS liked
+            FROM posts p JOIN users u ON u.id = p.user_id
+            {where}
+            ORDER BY p.created_at DESC LIMIT ? OFFSET ?""",
+        (me_id, *args, limit, offset))
+    posts = [dict(r) for r in await cur.fetchall()]
+    # Attach comments to each post (fine at v1 scale).
+    for p in posts:
+        cur = await db.execute(
+            """SELECT c.*, u.username, u.display_name FROM comments c
+               JOIN users u ON u.id = c.user_id
+               WHERE c.post_id = ? ORDER BY c.created_at ASC""", (p["id"],))
+        p["comments"] = [dict(r) for r in await cur.fetchall()]
+    return posts
+
+
+@app.get("/feed")
+async def feed(request: Request, db=Depends(get_db), user=Depends(current_user),
+               filter: str = "all", page: int = 1, msg: str = ""):
+    redir = login_required(user)
+    if redir:
+        return redir
+    page = max(1, page)
+    offset = (page - 1) * FEED_PAGE_SIZE
+    if filter == "following":
+        where = """WHERE p.user_id = ? OR p.user_id IN
+                   (SELECT followed_id FROM follows WHERE follower_id = ?)"""
+        args = (user["id"], user["id"])
+    else:
+        filter = "all"
+        where, args = "", ()
+    posts = await _post_rows(db, user["id"], where, args, FEED_PAGE_SIZE + 1, offset)
+    has_more = len(posts) > FEED_PAGE_SIZE
+    return templates.TemplateResponse(request, "feed.html", { "user": user, "posts": posts[:FEED_PAGE_SIZE],
+        "filter": filter, "page": page, "has_more": has_more, "msg": msg})
+
+
+@app.post("/post")
+async def create_post(request: Request, db=Depends(get_db), user=Depends(current_user),
+                      body: str = Form(...), kind: str = Form("post"),
+                      image: UploadFile = File(None)):
+    redir = login_required(user)
+    if redir:
+        return redir
+    body = body.strip()
+    if not body:
+        return RedirectResponse("/feed?msg=Post+can't+be+empty", status_code=303)
+    if len(body) > POST_MAX_LEN:
+        return RedirectResponse("/feed?msg=Posts+are+280+chars+max", status_code=303)
+    if kind not in ("post", "grow"):
+        kind = "post"
+    image_path = None
+    if image and image.filename:
+        ext = os.path.splitext(image.filename)[1].lower()
+        if ext not in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
+            return RedirectResponse("/feed?msg=Image+must+be+JPG/PNG/GIF/WebP", status_code=303)
+        data = await image.read()
+        if len(data) > MAX_UPLOAD_BYTES:
+            return RedirectResponse("/feed?msg=Image+too+large+(5MB+max)", status_code=303)
+        name = f"{uuid.uuid4().hex}{ext}"
+        with open(os.path.join(POST_IMG_DIR, name), "wb") as f:
+            f.write(data)
+        image_path = f"posts/{name}"
+    await db.execute(
+        "INSERT INTO posts (user_id, body, image_path, kind, created_at) VALUES (?, ?, ?, ?, ?)",
+        (user["id"], body, image_path, kind, _now()))
+    await db.commit()
+    dest = "/grow?msg=Grow+update+posted" if kind == "grow" else "/feed?msg=Posted"
+    return RedirectResponse(dest, status_code=303)
+
+
+@app.post("/post/{post_id}/like")
+async def toggle_like(request: Request, post_id: int, db=Depends(get_db),
+                      user=Depends(current_user)):
+    redir = login_required(user)
+    if redir:
+        return redir
+    cur = await db.execute("SELECT id FROM posts WHERE id = ?", (post_id,))
+    if not await cur.fetchone():
+        return RedirectResponse("/feed?msg=Post+not+found", status_code=303)
+    cur = await db.execute("SELECT 1 FROM likes WHERE user_id = ? AND post_id = ?",
+                           (user["id"], post_id))
+    if await cur.fetchone():
+        await db.execute("DELETE FROM likes WHERE user_id = ? AND post_id = ?",
+                         (user["id"], post_id))
+    else:
+        await db.execute("INSERT INTO likes (user_id, post_id, created_at) VALUES (?, ?, ?)",
+                         (user["id"], post_id, _now()))
+    await db.commit()
+    back = request.headers.get("referer", "/feed")
+    return RedirectResponse(back, status_code=303)
+
+
+@app.post("/post/{post_id}/comment")
+async def add_comment(request: Request, post_id: int, db=Depends(get_db),
+                      user=Depends(current_user), body: str = Form(...)):
+    redir = login_required(user)
+    if redir:
+        return redir
+    body = body.strip()[:500]
+    if body:
+        await db.execute(
+            "INSERT INTO comments (post_id, user_id, body, created_at) VALUES (?, ?, ?, ?)",
+            (post_id, user["id"], body, _now()))
+        await db.commit()
+    back = request.headers.get("referer", "/feed")
+    return RedirectResponse(back, status_code=303)
+
+
+@app.post("/post/{post_id}/delete")
+async def delete_post(request: Request, post_id: int, db=Depends(get_db),
+                      user=Depends(current_user)):
+    redir = login_required(user)
+    if redir:
+        return redir
+    cur = await db.execute("SELECT user_id, image_path FROM posts WHERE id = ?", (post_id,))
+    row = await cur.fetchone()
+    if row and (row["user_id"] == user["id"] or user["is_admin"]):
+        if row["image_path"]:
+            try:
+                os.remove(os.path.join(MEDIA_DIR, row["image_path"]))
+            except OSError:
+                pass
+        await db.execute("DELETE FROM posts WHERE id = ?", (post_id,))
+        await db.commit()
+        msg = "Post+deleted"
+    else:
+        msg = "Can't+delete+that+post"
+    back = request.headers.get("referer", "/feed")
+    sep = "&" if "?" in back else "?"
+    return RedirectResponse(f"{back}{sep}msg={msg}", status_code=303)
+
+
+@app.post("/post/{post_id}/report")
+async def report_post(request: Request, post_id: int, db=Depends(get_db),
+                      user=Depends(current_user), reason: str = Form("")):
+    redir = login_required(user)
+    if redir:
+        return redir
+    cur = await db.execute("SELECT user_id FROM posts WHERE id = ?", (post_id,))
+    row = await cur.fetchone()
+    if not row:
+        return RedirectResponse("/feed?msg=Post+not+found", status_code=303)
+    if row["user_id"] == user["id"]:
+        return RedirectResponse("/feed?msg=You+can't+report+your+own+post", status_code=303)
+    await db.execute(
+        "INSERT INTO reports (post_id, reporter_id, reason, created_at) VALUES (?, ?, ?, ?)",
+        (post_id, user["id"], reason.strip()[:300], _now()))
+    await db.commit()
+    return RedirectResponse("/feed?msg=Reported+-+mods+will+take+a+look", status_code=303)
+
+
+# --------------------------------------------------------------------------
+# Profiles & follows
+# --------------------------------------------------------------------------
+async def _profile_ctx(db, username, me):
+    cur = await db.execute("SELECT * FROM users WHERE username = ?", (username,))
+    profile = await cur.fetchone()
+    if not profile:
+        return None
+    profile = dict(profile)
+    cur = await db.execute("SELECT COUNT(*) n FROM follows WHERE followed_id = ?", (profile["id"],))
+    profile["follower_count"] = (await cur.fetchone())["n"]
+    cur = await db.execute("SELECT COUNT(*) n FROM follows WHERE follower_id = ?", (profile["id"],))
+    profile["following_count"] = (await cur.fetchone())["n"]
+    profile["is_following"] = False
+    if me and me["id"] != profile["id"]:
+        cur = await db.execute(
+            "SELECT 1 FROM follows WHERE follower_id = ? AND followed_id = ?",
+            (me["id"], profile["id"]))
+        profile["is_following"] = bool(await cur.fetchone())
+    profile["has_avatar"] = avatar_exists(profile["username"])
+    posts = await _post_rows(db, me["id"] if me else 0,
+                             "WHERE p.user_id = ?", (profile["id"],), 50, 0)
+    return profile, posts
+
+
+@app.get("/u/{username}")
+async def profile(request: Request, username: str, db=Depends(get_db),
+                  user=Depends(current_user), msg: str = ""):
+    ctx = await _profile_ctx(db, username, user)
+    if not ctx:
+        return templates.TemplateResponse(request, "404.html", { "user": user},
+                                          status_code=404)
+    profile, posts = ctx
+    gear = await currency.equipped_gear(db, profile["id"])
+    return templates.TemplateResponse(request, "profile.html", { "user": user, "profile": profile, "posts": posts, "msg": msg, "gear": gear})
+
+
+@app.get("/u/{username}/followers")
+async def followers(request: Request, username: str, db=Depends(get_db),
+                    user=Depends(current_user)):
+    redir = login_required(user)
+    if redir:
+        return redir
+    cur = await db.execute("SELECT * FROM users WHERE username = ?", (username,))
+    profile = await cur.fetchone()
+    if not profile:
+        return RedirectResponse("/feed", status_code=303)
+    cur = await db.execute(
+        """SELECT u.* FROM follows f JOIN users u ON u.id = f.follower_id
+           WHERE f.followed_id = ? ORDER BY u.username""", (profile["id"],))
+    people = [dict(r) for r in await cur.fetchall()]
+    return templates.TemplateResponse(request, "people.html", { "user": user, "profile": dict(profile),
+        "people": people, "title": "Followers"})
+
+
+@app.get("/u/{username}/following")
+async def following(request: Request, username: str, db=Depends(get_db),
+                    user=Depends(current_user)):
+    redir = login_required(user)
+    if redir:
+        return redir
+    cur = await db.execute("SELECT * FROM users WHERE username = ?", (username,))
+    profile = await cur.fetchone()
+    if not profile:
+        return RedirectResponse("/feed", status_code=303)
+    cur = await db.execute(
+        """SELECT u.* FROM follows f JOIN users u ON u.id = f.followed_id
+           WHERE f.follower_id = ? ORDER BY u.username""", (profile["id"],))
+    people = [dict(r) for r in await cur.fetchall()]
+    return templates.TemplateResponse(request, "people.html", { "user": user, "profile": dict(profile),
+        "people": people, "title": "Following"})
+
+
+@app.post("/u/{username}/follow")
+async def follow(request: Request, username: str, db=Depends(get_db),
+                 user=Depends(current_user)):
+    redir = login_required(user)
+    if redir:
+        return redir
+    cur = await db.execute("SELECT id FROM users WHERE username = ?", (username,))
+    target = await cur.fetchone()
+    if target and target["id"] != user["id"]:
+        await db.execute(
+            "INSERT OR IGNORE INTO follows (follower_id, followed_id, created_at)"
+            " VALUES (?, ?, ?)", (user["id"], target["id"], _now()))
+        await db.commit()
+    return RedirectResponse(f"/u/{username}", status_code=303)
+
+
+@app.post("/u/{username}/unfollow")
+async def unfollow(request: Request, username: str, db=Depends(get_db),
+                   user=Depends(current_user)):
+    redir = login_required(user)
+    if redir:
+        return redir
+    cur = await db.execute("SELECT id FROM users WHERE username = ?", (username,))
+    target = await cur.fetchone()
+    if target:
+        await db.execute("DELETE FROM follows WHERE follower_id = ? AND followed_id = ?",
+                         (user["id"], target["id"]))
+        await db.commit()
+    return RedirectResponse(f"/u/{username}", status_code=303)
+
+
+# --------------------------------------------------------------------------
+# Settings (profile edit + avatar upload)
+# --------------------------------------------------------------------------
+@app.get("/settings")
+async def settings_form(request: Request, db=Depends(get_db), user=Depends(current_user),
+                        msg: str = ""):
+    redir = login_required(user)
+    if redir:
+        return redir
+    return templates.TemplateResponse(request, "settings.html", { "user": user, "msg": msg,
+        "has_avatar": avatar_exists(user["username"]),
+        "rpm_subdomain": RPM_SUBDOMAIN})
+
+
+@app.post("/settings")
+async def settings_save(request: Request, db=Depends(get_db), user=Depends(current_user),
+                        display_name: str = Form(""), bio: str = Form(""),
+                        twitch_username: str = Form(""),
+                        avatar: UploadFile = File(None)):
+    redir = login_required(user)
+    if redir:
+        return redir
+    avatar_msg = ""
+    if avatar and avatar.filename:
+        try:
+            process_avatar_upload(avatar, user["username"])
+            # Any new/changed upload needs mod approval again before stream use.
+            await db.execute("UPDATE users SET avatar_approved = 0 WHERE id = ?",
+                             (user["id"],))
+            avatar_msg = "+Avatar+uploaded+-+pending+mod+approval"
+        except ValueError as e:
+            return RedirectResponse(f"/settings?msg={e}", status_code=303)
+    # A Twitch-verified link is authoritative: manual edits can't change it.
+    # Unlinking happens by re-linking a different account via /auth/twitch.
+    twitch_handle = (user["twitch_username"] if user["twitch_verified"]
+                     else twitch_username.strip()[:40])
+    await db.execute(
+        "UPDATE users SET display_name = ?, bio = ?, twitch_username = ? WHERE id = ?",
+        (display_name.strip()[:60] or user["username"], bio.strip()[:300],
+         twitch_handle, user["id"]))
+    await db.commit()
+    return RedirectResponse(f"/settings?msg=Profile+saved{avatar_msg}", status_code=303)
+
+
+@app.post("/settings/avatar3d")
+async def settings_avatar3d(request: Request, db=Depends(get_db), user=Depends(current_user),
+                            avatar_url: str = Form("")):
+    """Save the Ready Player Me GLB URL exported from the avatar creator."""
+    redir = login_required(user)
+    if redir:
+        return redir
+    url = avatar_url.strip()
+    if not url.startswith(RPM_MODEL_PREFIX):
+        return RedirectResponse("/settings?msg=That+avatar+URL+wasn't+accepted",
+                                status_code=303)
+    await db.execute("UPDATE users SET avatar_3d_url = ? WHERE id = ?",
+                     (url[:500], user["id"]))
+    await db.commit()
+    return RedirectResponse("/settings?msg=3D+avatar+saved", status_code=303)
+
+
+# --------------------------------------------------------------------------
+# DMs (1:1, polling — no websockets in v1)
+# --------------------------------------------------------------------------
+async def _conversations(db, me_id):
+    cur = await db.execute(
+        """SELECT u.*, MAX(m.id) AS last_id,
+                  (SELECT body FROM messages
+                    WHERE (sender_id = ? AND recipient_id = u.id)
+                       OR (sender_id = u.id AND recipient_id = ?)
+                    ORDER BY id DESC LIMIT 1) AS last_body,
+                  (SELECT created_at FROM messages
+                    WHERE (sender_id = ? AND recipient_id = u.id)
+                       OR (sender_id = u.id AND recipient_id = ?)
+                    ORDER BY id DESC LIMIT 1) AS last_at
+           FROM users u
+           JOIN messages m ON (m.sender_id = ? AND m.recipient_id = u.id)
+                           OR (m.sender_id = u.id AND m.recipient_id = ?)
+           WHERE u.id != ?
+           GROUP BY u.id ORDER BY last_id DESC""",
+        (me_id, me_id, me_id, me_id, me_id, me_id, me_id))
+    return [dict(r) for r in await cur.fetchall()]
+
+
+@app.get("/messages")
+async def dm_list(request: Request, db=Depends(get_db), user=Depends(current_user),
+                  msg: str = ""):
+    redir = login_required(user)
+    if redir:
+        return redir
+    convos = await _conversations(db, user["id"])
+    # Everyone you follow / who follows you is messageable — list them too.
+    cur = await db.execute(
+        """SELECT DISTINCT u.* FROM users u
+           WHERE u.id != ? AND u.id NOT IN
+             (SELECT CASE WHEN sender_id = ? THEN recipient_id ELSE sender_id END
+              FROM messages WHERE sender_id = ? OR recipient_id = ?)
+           ORDER BY u.username LIMIT 50""",
+        (user["id"], user["id"], user["id"], user["id"]))
+    others = [dict(r) for r in await cur.fetchall()]
+    return templates.TemplateResponse(request, "messages.html", { "user": user, "convos": convos, "others": others, "msg": msg})
+
+
+@app.get("/messages/{username}")
+async def dm_thread(request: Request, username: str, db=Depends(get_db),
+                    user=Depends(current_user), msg: str = ""):
+    redir = login_required(user)
+    if redir:
+        return redir
+    cur = await db.execute("SELECT * FROM users WHERE username = ?", (username,))
+    peer = await cur.fetchone()
+    if not peer or peer["id"] == user["id"]:
+        return RedirectResponse("/messages?msg=User+not+found", status_code=303)
+    cur = await db.execute(
+        """SELECT m.*, s.username AS sender_name FROM messages m
+           JOIN users s ON s.id = m.sender_id
+           WHERE (m.sender_id = ? AND m.recipient_id = ?)
+              OR (m.sender_id = ? AND m.recipient_id = ?)
+           ORDER BY m.id DESC LIMIT 50""",
+        (user["id"], peer["id"], peer["id"], user["id"]))
+    messages = [dict(r) for r in reversed(await cur.fetchall())]
+    last_id = messages[-1]["id"] if messages else 0
+    return templates.TemplateResponse(request, "conversation.html", { "user": user, "peer": dict(peer),
+        "messages": messages, "last_id": last_id, "msg": msg})
+
+
+@app.post("/messages/{username}/send")
+async def dm_send(username: str, request: Request, db=Depends(get_db),
+                  user=Depends(current_user), body: str = Form(...)):
+    redir = login_required(user)
+    if redir:
+        return redir
+    cur = await db.execute("SELECT id FROM users WHERE username = ?", (username,))
+    peer = await cur.fetchone()
+    body = body.strip()[:1000]
+    if peer and peer["id"] != user["id"] and body:
+        await db.execute(
+            "INSERT INTO messages (sender_id, recipient_id, body, created_at)"
+            " VALUES (?, ?, ?, ?)", (user["id"], peer["id"], body, _now()))
+        await db.commit()
+    return RedirectResponse(f"/messages/{username}", status_code=303)
+
+
+@app.get("/messages/{username}/poll")
+async def dm_poll(username: str, request: Request, db=Depends(get_db),
+                  user=Depends(current_user), after_id: int = 0):
+    """JSON poll endpoint for live-ish DM updates. Returns messages newer
+    than after_id in this conversation."""
+    if not user:
+        return JSONResponse({"error": "login"}, status_code=401)
+    cur = await db.execute("SELECT id FROM users WHERE username = ?", (username,))
+    peer = await cur.fetchone()
+    if not peer:
+        return JSONResponse({"messages": []})
+    cur = await db.execute(
+        """SELECT m.id, m.body, m.created_at, s.username AS sender_name,
+                  (m.sender_id = ?) AS mine
+           FROM messages m JOIN users s ON s.id = m.sender_id
+           WHERE m.id > ? AND ((m.sender_id = ? AND m.recipient_id = ?)
+                            OR (m.sender_id = ? AND m.recipient_id = ?))
+           ORDER BY m.id ASC""",
+        (user["id"], after_id, user["id"], peer["id"], peer["id"], user["id"]))
+    return JSONResponse({"messages": [dict(r) for r in await cur.fetchall()]})
+
+
+# --------------------------------------------------------------------------
+# Game currencies: wallets, exchange, faucet, shop (closed-loop, no cash value)
+# --------------------------------------------------------------------------
+@app.get("/wallet")
+async def wallet_page(request: Request, db=Depends(get_db), user=Depends(current_user),
+                      msg: str = ""):
+    redir = login_required(user)
+    if redir:
+        return redir
+    wallets = await currency.wallets_for(db, user["id"])
+    base = await currency.get_base_currency(db)
+    can_claim = True
+    if base:
+        cur = await db.execute(
+            "SELECT claimed_at FROM claims WHERE user_id = ? AND currency_id = ?",
+            (user["id"], base["id"]))
+        row = await cur.fetchone()
+        if row:
+            from datetime import datetime, timezone as _tz
+            elapsed = (datetime.now(_tz.utc) - datetime.fromisoformat(row["claimed_at"])).total_seconds()
+            can_claim = elapsed >= 24 * 3600
+    return templates.TemplateResponse(request, "wallet.html", {
+        "user": user, "msg": msg, "wallets": wallets,
+        "inventory": await currency.inventory_for(db, user["id"]),
+        "txns": await currency.recent_txns(db, user["id"]),
+        "can_claim": can_claim, "claim_amount": currency.DAILY_CLAIM_AMOUNT,
+    })
+
+
+@app.post("/wallet/claim")
+async def wallet_claim(request: Request, db=Depends(get_db), user=Depends(current_user)):
+    redir = login_required(user)
+    if redir:
+        return redir
+    ok, msg = await currency.claim_daily(db, user["id"])
+    return RedirectResponse(f"/wallet?msg={msg}", status_code=303)
+
+
+@app.get("/exchange")
+async def exchange_page(request: Request, db=Depends(get_db), user=Depends(current_user),
+                        msg: str = ""):
+    redir = login_required(user)
+    if redir:
+        return redir
+    return templates.TemplateResponse(request, "exchange.html", {
+        "user": user, "msg": msg,
+        "currencies": await currency.get_currencies(db),
+        "wallets": await currency.wallets_for(db, user["id"]),
+        "fee_pct": int(currency.EXCHANGE_FEE * 100),
+    })
+
+
+@app.post("/exchange")
+async def exchange_do(request: Request, db=Depends(get_db), user=Depends(current_user),
+                      from_code: str = Form(...), to_code: str = Form(...),
+                      amount: str = Form(...)):
+    redir = login_required(user)
+    if redir:
+        return redir
+    try:
+        amount_in = int(amount)
+    except ValueError:
+        return RedirectResponse("/exchange?msg=Amount+must+be+a+whole+number", status_code=303)
+    ok, msg, _out = await currency.swap(db, user["id"], from_code.strip(),
+                                        to_code.strip(), amount_in)
+    return RedirectResponse(f"/exchange?msg={msg}", status_code=303)
+
+
+@app.get("/shop")
+async def shop_page(request: Request, db=Depends(get_db), user=Depends(current_user),
+                    msg: str = ""):
+    redir = login_required(user)
+    if redir:
+        return redir
+    items = await currency.get_shop_items(db)
+    owned = {i["id"] for i in await currency.inventory_for(db, user["id"])}
+    return templates.TemplateResponse(request, "shop.html", {
+        "user": user, "msg": msg, "items": items, "owned": owned,
+        "wallets": await currency.wallets_for(db, user["id"]),
+    })
+
+
+@app.post("/shop/buy/{item_id}")
+async def shop_buy(item_id: int, request: Request, db=Depends(get_db),
+                   user=Depends(current_user)):
+    redir = login_required(user)
+    if redir:
+        return redir
+    ok, msg = await currency.buy_item(db, user["id"], item_id)
+    return RedirectResponse(f"/shop?msg={msg}", status_code=303)
+
+
+@app.post("/inventory/equip/{item_id}")
+async def inventory_equip(item_id: int, request: Request, db=Depends(get_db),
+                          user=Depends(current_user)):
+    redir = login_required(user)
+    if redir:
+        return redir
+    ok, msg = await currency.equip_item(db, user["id"], item_id)
+    return RedirectResponse(f"/wallet?msg={msg}", status_code=303)
+
+
+@app.post("/admin/currency/create")
+async def admin_currency_create(request: Request, db=Depends(get_db),
+                                user=Depends(current_user),
+                                code: str = Form(...), name: str = Form(...),
+                                owner: str = Form(""), icon: str = Form("🪙"),
+                                rate_to_base: str = Form("1.0")):
+    """Register a streamer's currency (fixed rate vs Budz)."""
+    redir = admin_required(user)
+    if redir:
+        return redir
+    code = code.strip().upper()
+    try:
+        rate = float(rate_to_base)
+        assert rate > 0
+    except (ValueError, AssertionError):
+        return RedirectResponse("/admin?msg=Rate+must+be+a+positive+number", status_code=303)
+    if not re.fullmatch(r"[A-Z]{2,8}", code):
+        return RedirectResponse("/admin?msg=Code+must+be+2-8+letters", status_code=303)
+    try:
+        await db.execute(
+            "INSERT INTO currencies (code, name, owner, icon, rate_to_base, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (code, name.strip()[:40] or code, owner.strip()[:40],
+             icon.strip()[:8] or "🪙", rate, _now()))
+        await db.commit()
+        msg = f"Currency+{code}+created"
+    except Exception:
+        msg = f"{code}+already+exists"
+    return RedirectResponse(f"/admin?msg={msg}", status_code=303)
+
+
+@app.post("/admin/currency/grant")
+async def admin_currency_grant(request: Request, db=Depends(get_db),
+                               user=Depends(current_user),
+                               username: str = Form(...), code: str = Form(...),
+                               amount: str = Form(...)):
+    """Mod grant: credit any user any currency (event prizes, corrections)."""
+    redir = admin_required(user)
+    if redir:
+        return redir
+    cur = await db.execute("SELECT id FROM users WHERE username = ?",
+                           (username.strip(),))
+    target = await cur.fetchone()
+    try:
+        amount = int(amount)
+        assert amount > 0
+    except (ValueError, AssertionError):
+        return RedirectResponse("/admin?msg=Amount+must+be+a+positive+number",
+                                status_code=303)
+    if not target:
+        return RedirectResponse("/admin?msg=User+not+found", status_code=303)
+    try:
+        await currency.award(db, target["id"], code.strip(), amount,
+                             f"mod grant by {user['username']}")
+        msg = f"Granted+{amount}+{code.upper()}+to+{username.strip()}"
+    except ValueError as e:
+        msg = str(e)
+    return RedirectResponse(f"/admin?msg={msg}", status_code=303)
+
+
+# --------------------------------------------------------------------------
+# THC tie-in pages
+# --------------------------------------------------------------------------
+@app.get("/leaderboard")
+async def leaderboard(request: Request, user=Depends(current_user), msg: str = ""):
+    redir = login_required(user)
+    if redir:
+        return redir
+    return templates.TemplateResponse(request, "leaderboard.html", { "user": user, "msg": msg,
+        "board": thc_adapter.get_casino_leaderboard(),
+        "mock": thc_adapter.MOCK})
+
+
+@app.get("/sportsbook")
+async def sportsbook_page(request: Request, user=Depends(current_user), msg: str = ""):
+    redir = login_required(user)
+    if redir:
+        return redir
+    return templates.TemplateResponse(request, "sportsbook.html", { "user": user, "msg": msg,
+        "lines": thc_adapter.get_sportsbook_lines(),
+        "mock": thc_adapter.MOCK})
+
+
+@app.get("/grow")
+async def grow_page(request: Request, db=Depends(get_db), user=Depends(current_user),
+                    msg: str = ""):
+    redir = login_required(user)
+    if redir:
+        return redir
+    posts = await _post_rows(db, user["id"], "WHERE p.kind = 'grow'", (), 30, 0)
+    return templates.TemplateResponse(request, "grow.html", { "user": user, "msg": msg, "posts": posts,
+        "stats": thc_adapter.get_grow_stats(), "mock": thc_adapter.MOCK})
+
+
+@app.get("/crew")
+async def crew_page(request: Request, db=Depends(get_db), user=Depends(current_user),
+                    msg: str = ""):
+    """Public showcase of everyone with a 3D avatar (the 3D Crew)."""
+    cur = await db.execute(
+        "SELECT username, display_name, avatar_3d_url FROM users"
+        " WHERE avatar_3d_url != '' ORDER BY id")
+    crew = [dict(r) for r in await cur.fetchall()]
+    return templates.TemplateResponse(request, "crew.html", { "user": user, "msg": msg,
+        "crew": crew})
+
+
+# --------------------------------------------------------------------------
+# Admin: reports + avatar approvals
+# --------------------------------------------------------------------------
+@app.get("/admin")
+async def admin_page(request: Request, db=Depends(get_db), user=Depends(current_user),
+                     msg: str = ""):
+    redir = admin_required(user)
+    if redir:
+        return redir
+    cur = await db.execute(
+        """SELECT r.*, p.body AS post_body, p.image_path,
+                  u.username AS post_author, ru.username AS reporter
+           FROM reports r
+           JOIN posts p ON p.id = r.post_id
+           JOIN users u ON u.id = p.user_id
+           JOIN users ru ON ru.id = r.reporter_id
+           WHERE r.resolved = 0 ORDER BY r.created_at DESC""")
+    reports = [dict(r) for r in await cur.fetchall()]
+    cur = await db.execute(
+        "SELECT username, display_name, twitch_username FROM users WHERE avatar_approved = 0")
+    pending = [dict(r) for r in await cur.fetchall() if avatar_exists(r["username"])]
+    return templates.TemplateResponse(request, "admin.html", { "user": user, "msg": msg,
+        "reports": reports, "pending_avatars": pending,
+        "currencies": await currency.get_currencies(db)})
+
+
+@app.post("/admin/avatar/{username}/approve")
+async def avatar_approve(username: str, db=Depends(get_db), user=Depends(current_user)):
+    redir = admin_required(user)
+    if redir:
+        return redir
+    await db.execute("UPDATE users SET avatar_approved = 1 WHERE username = ?", (username,))
+    await db.commit()
+    return RedirectResponse(f"/admin?msg=Avatar+approved+for+{username}", status_code=303)
+
+
+@app.post("/admin/avatar/{username}/reject")
+async def avatar_reject(username: str, db=Depends(get_db), user=Depends(current_user)):
+    redir = admin_required(user)
+    if redir:
+        return redir
+    try:
+        os.remove(avatar_path_for(username))
+    except OSError:
+        pass
+    await db.execute("UPDATE users SET avatar_approved = 0 WHERE username = ?", (username,))
+    await db.commit()
+    return RedirectResponse(f"/admin?msg=Avatar+rejected+for+{username}", status_code=303)
+
+
+@app.post("/admin/reports/{report_id}/resolve")
+async def report_resolve(request: Request, report_id: int, db=Depends(get_db),
+                         user=Depends(current_user), action: str = Form("dismiss")):
+    """Resolve a report. action=delete removes the post too; dismiss just closes it."""
+    redir = admin_required(user)
+    if redir:
+        return redir
+    cur = await db.execute("SELECT post_id FROM reports WHERE id = ?", (report_id,))
+    row = await cur.fetchone()
+    if row:
+        if action == "delete":
+            cur2 = await db.execute("SELECT image_path FROM posts WHERE id = ?",
+                                    (row["post_id"],))
+            prow = await cur2.fetchone()
+            if prow and prow["image_path"]:
+                try:
+                    os.remove(os.path.join(MEDIA_DIR, prow["image_path"]))
+                except OSError:
+                    pass
+            await db.execute("DELETE FROM posts WHERE id = ?", (row["post_id"],))
+        await db.execute("UPDATE reports SET resolved = 1 WHERE id = ?", (report_id,))
+        await db.commit()
+    return RedirectResponse("/admin?msg=Report+resolved", status_code=303)
+
+
+# ---------- Stream overlays: score ticker + live look (OBS browser sources) ----------
+@app.get("/ticker")
+async def ticker_page(request: Request):
+    """ESPN-style bottom score ticker. OBS Browser Source: 1920x64."""
+    return templates.TemplateResponse(request, "ticker.html", {"user": None})
+
+
+@app.get("/ticker.json")
+async def ticker_data():
+    return JSONResponse(ticker.get_scores())
+
+
+@app.get("/livelook")
+async def livelook_page(request: Request):
+    """Live-look stat window, rotates game to game. OBS Browser Source: 560x420."""
+    return templates.TemplateResponse(request, "livelook.html", {"user": None})
+
+
+@app.get("/livelook.json")
+async def livelook_data():
+    return JSONResponse(ticker.get_live_look())
+PICKS_PATH = os.path.join(BASE_DIR, "budz_picks.json")
+
+
+def load_budz_picks():
+    """Today's Budz Picks sheet (written daily by budz_picks.py)."""
+    try:
+        with open(PICKS_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and data.get("picks"):
+            return data
+    except Exception:
+        pass
+    return {"date": "", "picks": [], "parlay": None,
+            "note": "Today's sheet is still brewing \u2014 check back soon."}
+
+
+@app.get("/picks")
+async def picks_page(request: Request, user=Depends(current_user), msg: str = ""):
+    """Budz Picks: Jarvis's daily picks & parlay tickets."""
+    redir = login_required(user)
+    if redir:
+        return redir
+    return templates.TemplateResponse(request, "picks.html",
+                                      {"user": user, "msg": msg,
+                                       "picks": load_budz_picks()})

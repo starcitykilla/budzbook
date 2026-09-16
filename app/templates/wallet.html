@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Wallet — BudzBook{% endblock %}
+{% block content %}
+<h2>💰 Wallet</h2>
+<p class="muted">Game currencies — earned by watching, betting, and hanging out.
+No cash value, no cash-out. Pure bragging rights. 🪙</p>
+
+{% if can_claim %}
+  <form method="post" action="/wallet/claim">
+    <button class="btn big" type="submit">🎁 Claim daily {{ claim_amount }} Budz</button>
+  </form>
+{% else %}
+  <div class="notice">🎁 Daily claim collected — the faucet refills in 24h.</div>
+{% endif %}
+
+<h3>Balances</h3>
+{% for w in wallets %}
+  <div class="card wallet-row">
+    <div><span style="font-size:24px">{{ w.icon }}</span>
+      <b>{{ w.code }}</b> <span class="muted">{{ w.name }}</span>
+      {% if w.owner %}<div class="muted small">{{ w.owner }}'s currency</div>{% endif %}
+    </div>
+    <div class="wallet-bal">{{ w.balance }}</div>
+  </div>
+{% else %}
+  <div class="card muted">No currencies exist yet.</div>
+{% endfor %}
+<div class="row" style="margin:12px 0">
+  <a class="btn" href="/exchange">🔄 Exchange</a>
+  <a class="btn ghost" href="/shop">🛍️ Shop</a>
+</div>
+
+<h3>Your collection</h3>
+{% for item in inventory %}
+  <div class="card person">
+    <span style="font-size:28px">{{ item.icon }}</span>
+    <div><b>{{ item.name }}</b> <span class="tag">{{ item.kind }}</span></div>
+    {% if item.kind == 'frame' %}
+      <form method="post" action="/inventory/equip/{{ item.id }}">
+        <button class="btn sm ghost" type="submit">Equip</button></form>
+    {% endif %}
+  </div>
+{% else %}
+  <div class="card muted">Nothing yet — <a href="/shop">hit the shop</a>.</div>
+{% endfor %}
+{% if user.equipped_frame %}
+  <form method="post" action="/inventory/equip/0">
+    <button class="linkbtn muted" type="submit">Remove equipped frame</button></form>
+{% endif %}
+
+<h3>Recent activity</h3>
+{% for t in txns %}
+  <div class="txn">
+    <span>{{ t.icon }} <b>{{ "%+d"|format(t.delta) }}</b> {{ t.code }}</span>
+    <span class="muted small">{{ t.reason }} · {{ t.created_at|fdt }}</span>
+  </div>
+{% else %}
+  <div class="card muted">No activity yet.</div>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>BudzBook Live Look</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family:-apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background:rgba(10,15,12,.94); color:#e9f2ec; overflow:hidden;
+  }
+  .look { width:540px; padding:14px 16px 12px; }
+  .head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  .head .title { font-weight:800; letter-spacing:2px; color:#3ddc84; font-size:15px; }
+  .head .brand { font-size:12px; color:#e8c547; font-weight:700; letter-spacing:1px; }
+  .match { font-size:25px; font-weight:800; margin-bottom:2px; }
+  .match .sc { color:#e8c547; }
+  .sub { color:#8fa89a; font-size:14px; margin-bottom:10px; }
+  .sub .live { color:#ff5a5a; font-weight:800; }
+  .sub .lg { font-size:10px; font-weight:800; color:#0a0f0c; background:#3ddc84;
+             border-radius:4px; padding:2px 6px; letter-spacing:1px; margin-right:6px; }
+  .leaders { display:flex; flex-direction:column; gap:7px; min-height:180px; }
+  .ldr { display:flex; justify-content:space-between; align-items:center;
+         background:#14201a; border:1px solid #24382d; border-radius:10px;
+         padding:8px 12px; font-size:15px; }
+  .ldr .cat { font-size:11px; color:#8fa89a; text-transform:uppercase; letter-spacing:1px; }
+  .ldr .nm { font-weight:700; }
+  .ldr .ln { color:#e8c547; font-weight:700; white-space:nowrap; }
+  .dots { text-align:center; color:#8fa89a; font-size:12px; margin-top:10px; letter-spacing:2px; }
+</style>
+</head>
+<body>
+<div class="look">
+  <div class="head"><div class="title">??? LIVE LOOK</div><div class="brand">???? BUDZBOOK.US</div></div>
+  <div id="body"></div>
+  <div class="dots" id="dots"></div>
+</div>
+<script>
+let games = [], idx = 0;
+async function load() {
+  try {
+    const r = await fetch('/livelook.json', {cache:'no-store'});
+    games = await r.json();
+    if (idx >= games.length) idx = 0;
+    render();
+  } catch(e) {}
+}
+function render() {
+  if (!games.length) { document.getElementById('body').innerHTML = '<div class="sub">No games on the board right now.</div>'; return; }
+  const g = games[idx];
+  let sub;
+  if (g.state === 'in') {
+    const where = (g.league === 'MLB') ? esc(g.clock) : ((g.period > 4 ? 'OT' : 'Q' + g.period) + ' ' + esc(g.clock));
+    sub = '<span class="live">??? LIVE</span> ' + where;
+  }
+  else if (g.state === 'post') sub = 'FINAL';
+  else sub = 'UPCOMING ' + esc(preDate(g.date));
+  let html = '<div class="match">' + esc(g.away.abbr) + ' <span class="sc">' + g.away.score + '</span> @ ' +
+             esc(g.home.abbr) + ' <span class="sc">' + g.home.score + '</span></div>';
+  html += '<div class="sub"><span class="lg">' + esc(g.league || 'NFL') + '</span>' + esc(g.away.name) + ' at ' + esc(g.home.name) + ' ??? ' + sub + '</div><div class="leaders">';
+  if (g.leaders && g.leaders.length) {
+    for (const l of g.leaders.slice(0, 5)) {
+      html += '<div class="ldr"><div><div class="cat">' + (l.team ? esc(l.team) + ' ?? ' : '') + esc(l.category) +
+              '</div><div class="nm">' + esc(l.name) + '</div></div><div class="ln">' + esc(l.line) + '</div></div>';
+    }
+  } else {
+    const fallback = g.state === 'in' ? 'Follow the action live' : (g.state === 'post' ? 'Full highlights posting soon' : 'Scoring plays start at kickoff');
+    html += '<div class="ldr"><div class="nm">' + fallback + '</div><div class="ln">???</div></div>';
+  }
+  html += '</div>';
+  document.getElementById('body').innerHTML = html;
+  document.getElementById('dots').textContent = (idx + 1) + ' / ' + games.length;
+}
+function preDate(d){ try { const t = new Date(d); return t.toLocaleDateString('en-US',{weekday:'short'}) + ' ' + t.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}); } catch(e){ return ''; } }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function tick(){ if (games.length) { idx = (idx + 1) % games.length; render(); } }
+load(); setInterval(load, 120000); setInterval(tick, 12000);
+</script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Messages — BudzBook{% endblock %}
+{% block content %}
+<h2>Messages ✉️</h2>
+{% for c in convos %}
+  <a class="card convo" href="/messages/{{ c.username }}">
+    {% if c.avatar_approved %}
+      <img class="avatar sm" src="/media/avatars/{{ c.username }}.jpg" alt="">
+    {% else %}
+      <span class="avatar sm fallback">{{ c.display_name[0]|upper }}</span>
+    {% endif %}
+    <div><b>{{ c.display_name }}</b> <span class="uname">@{{ c.username }}</span>
+      <div class="muted truncate">{{ c.last_body }}</div></div>
+  </a>
+{% endfor %}
+{% if others %}
+  <h3>Start a conversation</h3>
+  {% for o in others %}
+    <a class="card person" href="/messages/{{ o.username }}">
+      <span class="avatar sm fallback">{{ o.display_name[0]|upper }}</span>
+      <div><b>{{ o.display_name }}</b> <span class="uname">@{{ o.username }}</span></div>
+    </a>
+  {% endfor %}
+{% endif %}
+{% if not convos and not others %}<div class="card muted">No conversations yet.</div>{% endif %}
+{% endblock %}

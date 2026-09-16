@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Budz Book — BudzBook{% endblock %}
+{% block content %}
+<h2>📖 Budz Book <span class="muted">sportsbook lines</span></h2>
+{% if mock %}<div class="notice">Demo lines — live FanDuel lines land here once the adapter reads the real feed.</div>{% endif %}
+{% for sport, games in lines.items() %}
+<div class="card">
+  <h3>{{ sport }}</h3>
+  {% for g in games %}
+  <div class="game">
+    <div class="teams"><b>{{ g.away }}</b> <span class="muted">at</span> <b>{{ g.home }}</b></div>
+    <div class="odds">
+      <span>ML: {{ g.ml_away }} / {{ g.ml_home }}</span>
+      <span>Spread: {{ g.spread }}</span>
+      <span>Total: {{ g.total }}</span>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endfor %}
+<p class="muted">Virtual Budz only — no real money. Bet for real in chat with <code>$sbet</code>.</p>
+{% endblock %}

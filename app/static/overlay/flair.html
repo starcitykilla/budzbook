@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Fan Flair Overlay</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:1920px; height:1080px; background:transparent; overflow:hidden; }
+  body { font-family:'Arial Black','Helvetica Neue',Arial,sans-serif; }
+
+  /* ---------- 3D stage, centered ---------- */
+  #stage { position:absolute; left:560px; top:230px; width:800px; height:620px; perspective:1500px; }
+  #card { position:absolute; left:50px; top:60px; width:700px; height:460px; transform-style:preserve-3d; opacity:0; }
+
+  #card.enter { transition:transform 1.0s cubic-bezier(.16,1.35,.3,1), opacity .35s ease;
+                transform:translateY(0) rotateX(0deg) scale(1); opacity:1; }
+  #card.pre   { transform:translateY(-420px) rotateX(-78deg) scale(.85); opacity:0; }
+  #card.idle  { animation:sway 3.8s ease-in-out infinite; }
+  #card.exit  { animation:none; transition:transform .65s ease-in, opacity .5s ease;
+                transform:translateY(420px) rotateX(72deg) scale(.9); opacity:0; }
+  @keyframes sway {
+    0%,100% { transform:rotateX(4deg) rotateY(-6deg); }
+    50%     { transform:rotateX(-4deg) rotateY(6deg); }
+  }
+
+  /* ---------- team themes (set on body) ---------- */
+  body.giants  { --c1:#0b2265; --c2:#a7194b; --glow:rgba(11,34,101,.85);  --txt1:#dfe8ff; --txt2:#7fa0e8; }
+  body.cowboys { --c1:#003594; --c2:#c0c5ce; --glow:rgba(0,53,148,.85);   --txt1:#f2f5fa; --txt2:#9fb4d8; }
+
+  /* ---------- card layers ---------- */
+  .burst { position:absolute; left:50%; top:46%; width:640px; height:640px; margin:-320px;
+           background:var(--c1);
+           clip-path:polygon(50% 0%,61% 35%,98% 35%,68% 57%,79% 91%,50% 70%,21% 91%,32% 57%,2% 35%,39% 35%);
+           opacity:.5; filter:blur(2px) drop-shadow(0 0 46px var(--glow));
+           transform:translateZ(-140px); animation:spin 26s linear infinite; }
+  @keyframes spin { to { transform:translateZ(-140px) rotate(360deg); } }
+
+  .glow { position:absolute; inset:-70px; border-radius:70px;
+          background:radial-gradient(ellipse at center, var(--glow), transparent 62%);
+          filter:blur(22px); transform:translateZ(-90px); }
+
+  .base { position:absolute; inset:0; border-radius:34px;
+          background:linear-gradient(150deg, rgba(6,8,14,.97), color-mix(in srgb, var(--c1) 42%, #06080e) 55%, rgba(6,8,14,.97));
+          border:4px solid var(--c2);
+          box-shadow:0 0 80px var(--glow), inset 0 0 50px rgba(0,0,0,.6);
+          transform:translateZ(0); }
+  .edge { position:absolute; inset:11px; border-radius:26px; border:2px solid rgba(255,255,255,.28);
+          transform:translateZ(6px); }
+
+  .team { position:absolute; left:0; right:0; top:52px; text-align:center; font-size:74px; letter-spacing:10px;
+          background:linear-gradient(180deg,var(--txt1) 25%,var(--txt2) 60%,var(--c2) 95%);
+          -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+          filter:drop-shadow(0 4px 8px rgba(0,0,0,.85));
+          transform:translateZ(52px); }
+  .reason { position:absolute; left:0; right:0; top:158px; text-align:center; font-size:104px; letter-spacing:3px;
+            color:#fff; filter:drop-shadow(0 0 26px var(--glow)) drop-shadow(0 5px 8px rgba(0,0,0,.9));
+            transform:translateZ(88px); }
+  .sub { position:absolute; left:0; right:0; top:300px; text-align:center;
+         font-family:Arial,sans-serif; font-weight:bold; font-size:30px; letter-spacing:12px;
+         color:var(--txt2); transform:translateZ(40px); }
+  .brand { position:absolute; left:0; right:0; top:368px; text-align:center;
+           font-family:Arial,sans-serif; font-weight:bold; font-size:22px; letter-spacing:9px;
+           color:rgba(255,255,255,.55); transform:translateZ(28px); }
+
+  .shine { position:absolute; top:-25%; bottom:-25%; width:140px; left:-200px;
+           background:linear-gradient(105deg, transparent, rgba(255,255,255,.4), transparent);
+           transform:translateZ(100px) rotate(16deg); pointer-events:none; }
+  #card.enter .shine { animation:sweep 1.2s .35s ease forwards; }
+  @keyframes sweep { to { left:820px; } }
+
+  /* ---------- falling confetti ---------- */
+  .confetti { position:absolute; top:-30px; width:14px; height:22px; opacity:0;
+              transform:translateZ(120px); pointer-events:none; }
+  #card.enter .confetti, #card.idle .confetti { animation:fall 3.1s ease-in infinite; }
+  @keyframes fall {
+    0%   { opacity:0; transform:translateZ(120px) translateY(-20px) rotate(0deg); }
+    12%  { opacity:1; }
+    100% { opacity:0; transform:translateZ(120px) translateY(560px) translateX(var(--dx)) rotate(720deg); }
+  }
+</style>
+</head>
+<body class="giants">
+  <div id="stage">
+    <div id="card" class="pre">
+      <div class="burst"></div>
+      <div class="glow"></div>
+      <div class="base"></div>
+      <div class="edge"></div>
+      <div class="team" id="team">GIANTS</div>
+      <div class="reason" id="reason">TOUCHDOWN!</div>
+      <div class="sub">FAN FLAIR</div>
+      <div class="brand">BUDZBOOK &bull; T.H.C.</div>
+      <div class="shine"></div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  var card = document.getElementById('card');
+  var teamEl = document.getElementById('team');
+  var reasonEl = document.getElementById('reason');
+  var lastNonce = 0, busy = false;
+
+  var WORDS = { giants:'GIANTS', cowboys:'COWBOYS' };
+  var CONF  = { giants:['#0b2265','#a7194b','#ffffff','#7fa0e8'],
+                cowboys:['#003594','#c0c5ce','#ffffff','#7fa8e0'] };
+
+  // build confetti (recolored per trigger)
+  var confetti = [];
+  for (var i = 0; i < 30; i++) {
+    var c = document.createElement('div');
+    c.className = 'confetti';
+    c.style.left = (Math.random() * 700) + 'px';
+    c.style.setProperty('--dx', ((Math.random() * 220) - 110) + 'px');
+    c.style.animationDelay = (Math.random() * 2.8) + 's';
+    c.dataset.i = i;
+    card.appendChild(c);
+    confetti.push(c);
+  }
+
+  function fitReason(r){
+    var len = r.length;
+    reasonEl.style.fontSize = len > 18 ? '64px' : len > 12 ? '84px' : '104px';
+  }
+
+  function show(d){
+    busy = true;
+    var team = (d.team === 'cowboys') ? 'cowboys' : 'giants';
+    document.body.className = team;
+    teamEl.textContent = WORDS[team];
+    var reason = (d.reason || 'TOUCHDOWN!').toUpperCase();
+    reasonEl.textContent = reason;
+    fitReason(reason);
+    var palette = CONF[team];
+    confetti.forEach(function(c, i){ c.style.background = palette[i % palette.length]; });
+
+    card.classList.remove('pre','exit');
+    void card.offsetWidth;
+    card.classList.add('enter');
+    setTimeout(function(){ card.classList.add('idle'); }, 1100);
+    setTimeout(function(){
+      card.classList.remove('enter','idle');
+      card.classList.add('exit');
+    }, 6000);
+    setTimeout(function(){
+      card.classList.remove('exit');
+      card.classList.add('pre');
+      busy = false;
+    }, 6800);
+  }
+
+  async function poll(){
+    try {
+      var r = await fetch('triggers/flair.json?t=' + Date.now(), {cache:'no-store'});
+      if (r.ok) {
+        var d = await r.json();
+        if (d && d.nonce > lastNonce && !busy) { lastNonce = d.nonce; show(d); }
+        else if (d && d.nonce > lastNonce) { lastNonce = d.nonce; }
+      }
+    } catch(e) {}
+  }
+  setInterval(poll, 1000);
+  poll();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Log in — BudzBook{% endblock %}
+{% block content %}
+<div class="card narrow">
+  <h2>Welcome back 🌿</h2>
+  <p class="muted">Log in to your BudzBook account, or <a href="/register">create one</a> to join.</p>
+  <form method="post" action="/login" class="form">
+    <label>Username <input name="username" required></label>
+    <label>Password <input type="password" name="password" required></label>
+    <button class="btn big" type="submit">Log in</button>
+  </form>
+  {% if twitch_configured %}
+  <div class="divider"><span>or</span></div>
+  <a class="btn big twitch" href="/auth/twitch">Continue with Twitch</a>
+  {% endif %}
+  <p class="muted">New here? <a href="/register">Create a BudzBook account</a></p>
+</div>
+{% endblock %}

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} — @{{ profile.username }}{% endblock %}
+{% block content %}
+<h2>{{ title }} <span class="muted">· <a href="/u/{{ profile.username }}">@{{ profile.username }}</a></span></h2>
+{% for p in people %}
+  <div class="card person">
+    {% if p.avatar_approved %}
+      <img class="avatar sm" src="/media/avatars/{{ p.username }}.jpg" alt="">
+    {% else %}
+      <span class="avatar sm fallback">{{ p.display_name[0]|upper }}</span>
+    {% endif %}
+    <div><a class="who" href="/u/{{ p.username }}">{{ p.display_name }}</a>
+      <span class="uname">@{{ p.username }}</span></div>
+  </div>
+{% else %}
+  <div class="card muted">Nobody here yet.</div>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}3D Crew — BudzBook{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>The 3D Crew 🌿</h2>
+  <p class="muted">Everyone with a 3D avatar. Drag one to spin it, scroll to zoom, click for a hop.
+  Want in? <a href="/settings">Create your 3D avatar</a>.</p>
+</div>
+{% if crew %}
+<div class="crew-grid">
+  {% for m in crew %}
+  <a class="crew-card" href="/u/{{ m.username }}">
+    <div class="avatar3d avatar3d-sm" data-url="{{ m.avatar_3d_url }}"></div>
+    <div class="crew-name">{{ m.display_name }}</div>
+    <div class="uname">@{{ m.username }}</div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card muted">No 3D avatars yet — <a href="/settings">create yours in Settings</a> and be the first. 🌿</div>
+{% endif %}
+<script type="importmap">
+{"imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module" src="/static/js/avatar3d.js"></script>
+{% endblock %}

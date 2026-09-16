@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}BudzBook{% endblock %}</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0d1512">
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BudzBook">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="{% if user %}/feed{% else %}/{% endif %}">🌿 BudzBook</a>
+  <nav class="nav">
+    {% if user %}
+      <a href="/feed">Feed</a>
+      <a href="/leaderboard" title="Casino leaderboard">🏆</a>
+      <a href="/sportsbook" title="Budz Book">📖</a>
+      <a href="/picks" title="Budz Picks">🎯</a>
+      <a href="/grow" title="Grow journal">🌱</a>
+      <a href="/crew" title="3D Crew">🧍</a>
+      <a href="/wallet" title="Wallet">💰</a>
+      <a href="/messages" title="Messages">✉️</a>
+      <a href="/u/{{ user.username }}" title="Your profile">@{{ user.username }}</a>
+      {% if user.is_admin %}<a href="/admin" title="Mod tools">🛡️</a>{% endif %}
+      <form method="post" action="/logout" style="display:inline">
+        <button class="linkbtn" type="submit" title="Log out">⏻</button>
+      </form>
+    {% else %}
+      <a href="/login">Log in</a>
+      <a class="btn" href="/register">Join</a>
+    {% endif %}
+  </nav>
+</header>
+<main class="wrap">
+  {% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+<footer class="foot">BudzBook · 21+ cannabis community · please consume responsibly 🌿</footer>
+<script src="/static/app.js"></script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", function () {
+    navigator.serviceWorker.register("/static/sw.js").catch(function () {});
+  });
+}
+</script>
+</body>
+</html>

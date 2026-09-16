@@ -1,0 +1,56 @@
+{
+  "date": "Tuesday, September 15, 2026",
+  "generated_at": "2026-09-16T01:15:40.573392+00:00",
+  "picks": [
+    {
+      "sport": "NFL",
+      "matchup": "Detroit Lions at Buffalo Bills",
+      "tip": "Thu 9/17 8:15 PM ET",
+      "pick": "Buffalo Bills ML",
+      "odds": "-220",
+      "blurb": "Chalky, but the books don't hand out -220 for nothing. Buffalo Bills handles business at home.",
+      "stars": "⭐⭐⭐",
+      "tag": "banker"
+    },
+    {
+      "sport": "MLB",
+      "matchup": "Los Angeles Dodgers at Cincinnati Reds",
+      "tip": "Wed 9/16 6:41 PM ET",
+      "pick": "Los Angeles Dodgers ML",
+      "odds": "-215",
+      "blurb": "Not cute, just correct. Los Angeles Dodgers is the better side and -215 is a fair price to say so.",
+      "stars": "⭐⭐⭐",
+      "tag": "banker"
+    },
+    {
+      "sport": "MLB",
+      "matchup": "Athletics at Tampa Bay Rays",
+      "tip": "Wed 9/16 6:41 PM ET",
+      "pick": "Tampa Bay Rays ML",
+      "odds": "-184",
+      "blurb": "Sometimes the obvious answer is obvious. Tampa Bay Rays wins this more often than not.",
+      "stars": "⭐⭐",
+      "tag": "banker"
+    },
+    {
+      "sport": "MLB",
+      "matchup": "Seattle Mariners at Los Angeles Angels",
+      "tip": "Tue 9/15 9:38 PM ET",
+      "pick": "Los Angeles Angels ML",
+      "odds": "+146",
+      "blurb": "Sprinkle pick. Los Angeles Angels probably loses, but at +146 you only need to be right sometimes.",
+      "stars": "⭐",
+      "tag": "dart"
+    }
+  ],
+  "parlay": {
+    "legs": [
+      "Bills ML (-220)",
+      "Dodgers ML (-215)",
+      "Rays ML (-184)"
+    ],
+    "combined_odds": "+229",
+    "stake_budz": 50
+  },
+  "note": "Jarvis's leans for the slate — bankers plus one dart. Leans, not locks. Play-money BUDZ only."
+}
