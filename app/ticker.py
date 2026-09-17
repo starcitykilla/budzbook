@@ -14,6 +14,7 @@ Live-look "leaders" are latest scoring plays: team, category, name, line.
 
 import csv  # noqa: F401  (kept for future nflverse use)
 import datetime
+import os
 import json
 import time
 import urllib.request
@@ -22,8 +23,13 @@ _UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                      "AppleWebKit/537.36 (KHTML, like Gecko) "
                      "Chrome/126.0 Safari/537.36"}
 
-# --- legacy ESPN endpoints (kept first; 403 on some networks) ---
-_ESPN_SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/nfl/scoreboard"
+# --- ESPN endpoints (403 on some networks; NFL has theScore fallback) ---
+_ESPN_LEAGUES = {
+    "NFL": "football/nfl/scoreboard",
+    "NBA": "basketball/nba/scoreboard",
+    "NHL": "hockey/nhl/scoreboard",
+}
+_ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports/"
 
 # --- theScore NFL fallback ---
 _THESCORE_EVENTS = "https://api.thescore.com/nfl/events"
@@ -40,6 +46,66 @@ _SCORES_TTL = 60.0
 _LOOK_TTL = 120.0
 _DETAIL_TTL = 600.0
 
+# ---------------------------------------------------------------- spreads
+# Pre-game spread lines, read-only from the T.H.C. sportsbook's odds cache
+# (FanDuel lines — the same board as $lines in chat). Never triggers an
+# Odds API refresh, so no quota is burned.
+_SOCIAL = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ODDS_CACHE = os.path.normpath(
+    os.path.join(_SOCIAL, "..", "thc-test", "odds_cache.json"))
+
+
+def _load_spread_lines():
+    """{full team name: spread line}. Negative = that team is favored."""
+    try:
+        with open(_ODDS_CACHE, encoding="utf-8") as f:
+            cache = json.load(f)
+    except Exception:
+        return {}
+    lines = {}
+    for sport in (cache.get("sports") or {}).values():
+        for g in (sport.get("games") or []):
+            try:
+                spread = g.get("spread") or {}
+                if "home_line" in spread:
+                    lines[g["home"]] = float(spread["home_line"])
+                if "away_line" in spread:
+                    lines[g["away"]] = float(spread["away_line"])
+            except (KeyError, TypeError, ValueError):
+                continue
+    return lines
+
+
+def cover_result(home_score, away_score, home_line):
+    """'home' / 'away' / 'push' / None: who is covering the spread."""
+    try:
+        margin = int(home_score) - int(away_score)
+        line = float(home_line)
+    except (TypeError, ValueError):
+        return None
+    diff = margin + line
+    if diff > 0:
+        return "home"
+    if diff < 0:
+        return "away"
+    return "push"
+
+
+def _attach_lines(games):
+    """Add 'spread' (home perspective) + 'covering' to each game dict."""
+    lines = _load_spread_lines()
+    for g in games:
+        home = g.get("home") or {}
+        away = g.get("away") or {}
+        line = lines.get(home.get("name", ""))
+        g["spread"] = line
+        if line is not None and g.get("state") in ("in", "post"):
+            g["covering"] = cover_result(home.get("score", 0),
+                                         away.get("score", 0), line)
+        else:
+            g["covering"] = None
+    return games
+
 
 def _http_get_json(url, timeout=15):
     req = urllib.request.Request(url, headers=_UA)
@@ -47,18 +113,19 @@ def _http_get_json(url, timeout=15):
         return json.loads(resp.read().decode("utf-8"))
 
 
-# ---------------------------------------------------------------- ESPN (NFL)
-def _parse_espn_game(ev):
+# ---------------------------------------------------------------- ESPN
+def _parse_espn_game(ev, league="NFL"):
     comp = (ev.get("competitions") or [{}])[0]
     status = ev.get("status") or {}
     stype = status.get("type") or {}
     game = {
         "id": "espn-" + str(ev.get("id", "")),
-        "league": "NFL",
+        "league": league,
         "state": stype.get("state", "pre"),
         "clock": status.get("displayClock", ""),
         "period": status.get("period", 0),
         "date": ev.get("date", ""),
+        "detail": stype.get("shortDetail", "") or stype.get("detail", ""),
     }
     for c in comp.get("competitors", []) or []:
         team = c.get("team") or {}
@@ -77,12 +144,18 @@ def _parse_espn_game(ev):
     return game
 
 
-def _espn_nfl():
+def _espn_league(league):
+    """ESPN scoreboard for one league (NFL/NBA/NHL). [] on any failure."""
     try:
-        data = _http_get_json(_ESPN_SCOREBOARD)
+        data = _http_get_json(_ESPN_BASE + _ESPN_LEAGUES[league])
     except Exception:
         return []
-    return [_parse_espn_game(ev) for ev in data.get("events", []) or []]
+    return [_parse_espn_game(ev, league)
+            for ev in data.get("events", []) or []]
+
+
+def _espn_nfl():
+    return _espn_league("NFL")
 
 
 # ------------------------------------------------------- theScore NFL fallback
@@ -256,7 +329,12 @@ def _mlb():
 
 # ------------------------------------------------------------------ public
 def get_scores():
-    """NFL + MLB games for the ticker. Cached 60s; stale data on failure."""
+    """NFL + NBA + NHL + MLB games for the ticker.
+
+    Cached 60s; stale data served on failure. Every game also carries
+    'spread' (pre-game line, home-team perspective) and 'covering'
+    ('home'/'away'/'push'/None) for live and final games.
+    """
     now = time.time()
     if now - _scores_cache["at"] < _SCORES_TTL and _scores_cache["data"]:
         return _scores_cache["data"]
@@ -264,11 +342,17 @@ def get_scores():
         nfl = _espn_nfl() or _thescore_nfl()
     except Exception:
         nfl = []
+    extra = []
+    for lg in ("NBA", "NHL"):
+        try:
+            extra.extend(_espn_league(lg))
+        except Exception:
+            pass
     try:
         mlb = _mlb()
     except Exception:
         mlb = []
-    games = (nfl or []) + (mlb or [])
+    games = _attach_lines((nfl or []) + extra + (mlb or []))
     if games:
         _scores_cache["data"] = games
         _scores_cache["at"] = now
@@ -307,6 +391,9 @@ def get_live_look():
             "clock": g["clock"],
             "period": g["period"],
             "date": g["date"],
+            "detail": g.get("detail", ""),
+            "spread": g.get("spread"),
+            "covering": g.get("covering"),
             "leaders": leaders,
         })
     if out:

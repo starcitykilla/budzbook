@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Hug Cam Overlay</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:1920px; height:1080px; background:transparent; overflow:hidden; }
+  body { font-family:'Arial Black','Helvetica Neue',Arial,sans-serif; }
+
+  #hug-stage {
+    position:absolute; left:50%; bottom:56px; transform:translateX(-50%);
+    width:460px; text-align:center;
+    opacity:0; transition:opacity .45s ease, transform .55s cubic-bezier(.16,1.35,.3,1);
+    transform:translateX(-50%) scale(.82);
+    pointer-events:none;
+  }
+  #hug-stage.show { opacity:1; transform:translateX(-50%) scale(1); }
+  #hug-stage.hide { opacity:0; transform:translateX(-50%) scale(.94); transition:opacity .6s ease, transform .6s ease; }
+
+  #hug-caption {
+    font-size:40px; letter-spacing:2px; color:#fff; margin-bottom:10px;
+    background:linear-gradient(180deg,#fff8e1 20%,#e8c34a 55%,#9a7a24 90%);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    filter:drop-shadow(0 3px 6px rgba(0,0,0,.85));
+    white-space:nowrap;
+  }
+  #hug-video {
+    width:460px; height:auto; display:block; margin:0 auto;
+    filter:drop-shadow(0 0 34px rgba(232,195,74,.45));
+  }
+</style>
+</head>
+<body>
+  <div id="hug-stage">
+    <div id="hug-caption"></div>
+    <video id="hug-video" src="hug.webm" muted playsinline preload="auto"></video>
+  </div>
+
+<script>
+(function(){
+  var stage = document.getElementById('hug-stage');
+  var caption = document.getElementById('hug-caption');
+  var video = document.getElementById('hug-video');
+  var lastNonce = 0, busy = false, hideTimer = null;
+
+  function finish(){
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    stage.classList.remove('show');
+    stage.classList.add('hide');
+    setTimeout(function(){
+      stage.classList.remove('hide');
+      try { video.pause(); } catch(e) {}
+      busy = false;
+    }, 650);
+  }
+
+  function show(d){
+    busy = true;
+    var from = (d.from || 'KRZY_BUDZ').toUpperCase();
+    var to = (d.to || 'QUEENSHIDA').toUpperCase();
+    caption.textContent = '\u{1F917} ' + from + ' hugs ' + to;
+    stage.classList.remove('hide');
+    void stage.offsetWidth; /* restart transition */
+    stage.classList.add('show');
+    try {
+      video.currentTime = 0;
+      var p = video.play();
+      if (p && p.catch) { p.catch(function(){ finish(); }); }
+    } catch(e) { finish(); return; }
+    /* safety: never stay stuck on screen */
+    hideTimer = setTimeout(finish, 16000);
+  }
+
+  video.addEventListener('ended', function(){
+    setTimeout(finish, 900);
+  });
+
+  async function poll(){
+    try {
+      var r = await fetch('triggers/hug.json?t=' + Date.now(), {cache:'no-store'});
+      if (r.ok) {
+        var d = await r.json();
+        if (d && d.nonce > lastNonce) {
+          lastNonce = d.nonce;
+          if (!busy) { show(d); }
+        }
+      }
+    } catch(e) {}
+  }
+  setInterval(poll, 1000);
+  poll();
+})();
+</script>
+</body>
+</html>

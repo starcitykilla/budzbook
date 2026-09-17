@@ -22,8 +22,12 @@ from itsdangerous import BadSignature, URLSafeSerializer
 
 from .auth import SESSION_SECRET  # reuse the session secret for state signing
 
-TWITCH_CLIENT_ID = os.environ.get("TWITCH_CLIENT_ID", "")
-TWITCH_CLIENT_SECRET = os.environ.get("TWITCH_CLIENT_SECRET", "")
+def _client_id() -> str:
+    return os.environ.get("TWITCH_CLIENT_ID", "").strip()
+
+
+def _client_secret() -> str:
+    return os.environ.get("TWITCH_CLIENT_SECRET", "").strip()
 TWITCH_AUTHORIZE_URL = "https://id.twitch.tv/oauth2/authorize"
 TWITCH_TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 TWITCH_USERS_URL = "https://api.twitch.tv/helix/users"
@@ -35,7 +39,7 @@ _state = URLSafeSerializer(SESSION_SECRET, salt="budzbook-twitch-oauth")
 
 def configured() -> bool:
     """True when the Twitch app credentials are present."""
-    return bool(TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET)
+    return bool(_client_id() and _client_secret())
 
 
 def make_state(link_uid=None) -> str:
@@ -56,7 +60,7 @@ def read_state(token: str):
 
 def authorize_url(redirect_uri: str, state: str) -> str:
     params = {
-        "client_id": TWITCH_CLIENT_ID,
+        "client_id": _client_id(),
         "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": " ".join(TWITCH_SCOPES),
@@ -71,8 +75,8 @@ async def exchange_code(code: str, redirect_uri: str) -> str:
         resp = await client.post(
             TWITCH_TOKEN_URL,
             data={
-                "client_id": TWITCH_CLIENT_ID,
-                "client_secret": TWITCH_CLIENT_SECRET,
+                "client_id": _client_id(),
+                "client_secret": _client_secret(),
                 "code": code,
                 "grant_type": "authorization_code",
                 "redirect_uri": redirect_uri,
@@ -88,7 +92,7 @@ async def fetch_twitch_user(access_token: str) -> dict:
         resp = await client.get(
             TWITCH_USERS_URL,
             headers={
-                "Client-Id": TWITCH_CLIENT_ID,
+                "Client-Id": _client_id(),
                 "Authorization": f"Bearer {access_token}",
             },
         )

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}#{{ tag }} — BudzBook{% endblock %}
+{% block content %}
+<h2><span class="htag big">#{{ tag }}</span></h2>
+{% for post in posts %}
+  {% include "_post.html" %}
+{% else %}
+  <div class="card muted">Nothing tagged #{{ tag }} yet.</div>
+{% endfor %}
+{% if has_more %}
+  <div class="center"><a class="btn ghost" href="/tag/{{ tag }}?page={{ page + 1 }}">Load more</a></div>
+{% endif %}
+{% endblock %}

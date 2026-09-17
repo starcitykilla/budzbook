@@ -1,6 +1,6 @@
 /* BudzBook 3D avatar viewer.
  *
- * Finds every `.avatar3d[data-url]` on the page and renders the Ready Player Me
+ * Finds every `.avatar3d[data-url]` on the page and renders the Avaturn
  * GLB inside it with three.js: slow turntable, gentle bob, drag-to-spin,
  * scroll-to-zoom, click for a hop. One shared rAF loop drives all instances;
  * offscreen canvases are paused via IntersectionObserver. Any failure

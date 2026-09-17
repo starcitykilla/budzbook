@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>BudzBook Stream Ticker</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:1920px; height:120px; background:transparent; overflow:hidden; }
+  body { font-family:'Arial Black','Helvetica Neue',Arial,sans-serif; }
+  #bar { position:absolute; left:0; right:0; bottom:0; height:120px; display:flex;
+         background:linear-gradient(180deg, rgba(6,10,8,.82), rgba(6,10,8,.95));
+         border-top:3px solid #e8c547; }
+  .brand { flex:0 0 auto; display:flex; flex-direction:column; justify-content:center;
+           padding:0 26px; background:rgba(13,21,18,.9); border-right:3px solid #e8c547;
+           color:#3ddc84; font-size:26px; letter-spacing:2px; white-space:nowrap; z-index:2; }
+  .brand small { color:#e8c547; font-size:14px; letter-spacing:4px; margin-top:4px; }
+  .lines { flex:1; display:flex; flex-direction:column; justify-content:center;
+           overflow:hidden; padding:6px 0; }
+  .viewport { overflow:hidden; white-space:nowrap; height:52px; display:flex; align-items:center; }
+  .viewport.dim { height:44px; }
+  .track { display:inline-flex; align-items:center; white-space:nowrap;
+           animation:scroll 90s linear infinite; will-change:transform; }
+  .viewport.dim .track { animation-duration:110s; }
+  @keyframes scroll { from { transform:translateX(0); } to { transform:translateX(-50%); } }
+  .ticker-item { display:inline-flex; align-items:center; gap:10px; padding:0 30px;
+                 font-size:26px; font-weight:700; color:#eef5f0; }
+  .viewport.dim .ticker-item { font-size:21px; color:#b9cec2; font-weight:600; }
+  .ticker-item .live { color:#ff5a5a; font-size:20px; }
+  .ticker-item .cover { color:#3ddc84; }
+  .ticker-item .push { color:#e8c547; }
+  .tick-sep { color:#3a5a48; font-size:18px; }
+</style>
+</head>
+<body>
+<div id="bar" hidden>
+  <div class="brand">🌿 BUDZBOOK.US<small>SCORES + LINES</small></div>
+  <div class="lines">
+    <div class="viewport"><div class="track" id="track-scores"></div></div>
+    <div class="viewport dim"><div class="track" id="track-lines"></div></div>
+  </div>
+</div>
+<script>
+(function () {
+  var EMOJI = { NFL: "🏈", NBA: "🏀", MLB: "⚾", NHL: "🏒" };
+  function fmtSpread(g) {
+    if (g.spread == null) return "";
+    var fav = g.spread <= 0 ? g.home : g.away;
+    var line = g.spread <= 0 ? g.spread : -g.spread;
+    return " · " + fav.abbr + " " + line;
+  }
+  function coverTag(g, verb) {
+    if (g.spread == null || !g.covering) return "";
+    if (g.covering === "push") return ' · <span class="push">push</span>';
+    var t = g.covering === "home" ? g.home : g.away;
+    return ' · <span class="cover">' + t.abbr + " " + verb + "</span>";
+  }
+  function fmtDate(iso) {
+    try {
+      var d = new Date(iso);
+      return d.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+    } catch (e) { return ""; }
+  }
+  function sc(g) {
+    return g.away.abbr + " " + g.away.score + " @ " + g.home.abbr + " " + g.home.score;
+  }
+  function scoreItem(g) {
+    var em = EMOJI[g.league] || "🏟️";
+    var html;
+    if (g.state === "in") {
+      var clk = g.clock || (g.period ? "P" + g.period : "");
+      html = em + ' <b class="live">LIVE</b> ' + clk + " · " + sc(g);
+    } else if (g.state === "post") {
+      html = em + " F · " + sc(g);
+    } else {
+      var when = g.detail || fmtDate(g.date);
+      html = em + " " + when + " · " + g.away.abbr + " @ " + g.home.abbr;
+    }
+    return '<span class="ticker-item">' + html + "</span>";
+  }
+  function lineItem(g) {
+    if (g.spread == null) return "";
+    var em = EMOJI[g.league] || "🏟️";
+    var mu = g.away.abbr + " @ " + g.home.abbr;
+    var html;
+    if (g.state === "in") {
+      html = em + " " + mu + fmtSpread(g) + coverTag(g, "covering");
+    } else if (g.state === "post") {
+      html = em + " F " + mu + fmtSpread(g) + coverTag(g, "covered ✓");
+    } else {
+      var when = g.detail || fmtDate(g.date);
+      html = em + " " + when + " " + mu + fmtSpread(g);
+    }
+    return '<span class="ticker-item">' + html + "</span>";
+  }
+  function setTrack(id, itemsHtml) {
+    var track = document.getElementById(id);
+    if (!track) return;
+    var half = itemsHtml.join('<span class="tick-sep">•</span>');
+    track.innerHTML = half + '<span class="tick-sep">•</span>' + half;
+  }
+  function render(games) {
+    var bar = document.getElementById("bar");
+    if (!bar || !games || !games.length) return;
+    var order = { in: 0, pre: 1, post: 2 };
+    games = games.slice().sort(function (a, b) {
+      return (order[a.state] - order[b.state]) || (a.league < b.league ? -1 : 1);
+    }).slice(0, 16);
+    setTrack("track-scores", games.map(scoreItem));
+    var lines = games.map(lineItem).filter(function (s) { return s; });
+    setTrack("track-lines", lines);
+    bar.hidden = false;
+  }
+  async function load() {
+    try {
+      var r = await fetch("/ticker.json", { cache: "no-store" });
+      if (r.ok) render(await r.json());
+    } catch (e) { /* ticker is decorative; never break the overlay */ }
+  }
+  load();
+  setInterval(load, 90000);
+})();
+</script>
+</body>
+</html>

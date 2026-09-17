@@ -1,7 +1,10 @@
-"""Tests for 3D avatars (Ready Player Me) + the /crew showcase page.
+"""Tests for the generic 3D GLB viewers + the /crew showcase page.
 
-Covers: the avatar_3d_url migration, the /settings/avatar3d save endpoint
-(auth required, strict URL allowlist), and the public /crew page.
+The Avaturn editor was removed from the site, and the in-house creature
+builder was ripped out afterwards. What remains: the avatar_3d_url
+column/migration, the generic Three.js GLB viewers (profile, /crew) that
+render already-saved URLs, and the public /crew page. Asserts /settings no
+longer references Avaturn or the builder.
 No network calls are made (no GLB is ever fetched in tests).
 """
 import asyncio
@@ -54,61 +57,24 @@ async def _avatar3d_url(username):
     return row[0] if row else None
 
 
-GOOD_URL = "https://models.readyplayer.me/abc123.glb"
-EVIL_URL = "https://evil.example.com/x.glb"
-
-
-# ---------------------------------------------------------------- migration
-def test_migration_adds_avatar3d_column():
-    async def cols():
-        db = await aiosqlite.connect(DB_PATH)
-        cur = await db.execute("PRAGMA table_info(users)")
-        names = {row[1] for row in await cur.fetchall()}
-        await db.close()
-        return names
-
-    assert "avatar_3d_url" in asyncio.run(cols())
-
-
-# ---------------------------------------------------------------- endpoint
-def test_avatar3d_requires_login():
+# ------------------------------------------------------- settings page render
+def test_settings_page_has_no_avaturn_editor():
+    # Avaturn was ripped out: the editor, its SDK, and the manual .glb
+    # link form are gone. The creature builder was ripped out too: only
+    # the 2D avatar upload section remains on /settings.
     c = _client()
-    r = c.post("/settings/avatar3d", data={"avatar_url": GOOD_URL},
-               follow_redirects=False)
-    assert r.status_code == 303
-    assert r.headers["location"].startswith("/login")
-
-
-def test_avatar3d_rejects_non_rpm_url():
-    c = _client()
-    _register(c, "alice3d")
-    _login(c, "alice3d")
-    r = c.post("/settings/avatar3d", data={"avatar_url": EVIL_URL},
-               follow_redirects=False)
-    assert r.status_code == 303
-    assert "wasn" in r.headers["location"]  # "That avatar URL wasn't accepted"
-    assert asyncio.run(_avatar3d_url("alice3d")) == ""
-
-
-def test_avatar3d_rejects_empty_url():
-    c = _client()
-    _register(c, "bob3d")
-    _login(c, "bob3d")
-    r = c.post("/settings/avatar3d", data={"avatar_url": "   "},
-               follow_redirects=False)
-    assert r.status_code == 303
-    assert asyncio.run(_avatar3d_url("bob3d")) == ""
-
-
-def test_avatar3d_accepts_rpm_url():
-    c = _client()
-    _register(c, "carol3d")
-    _login(c, "carol3d")
-    r = c.post("/settings/avatar3d", data={"avatar_url": GOOD_URL},
-               follow_redirects=False)
-    assert r.status_code == 303
-    assert "3D+avatar+saved" in r.headers["location"]
-    assert asyncio.run(_avatar3d_url("carol3d")) == GOOD_URL
+    _register(c, "dave3d")
+    _login(c, "dave3d")
+    r = c.get("/settings")
+    assert r.status_code == 200
+    low = r.text.lower()
+    assert "avaturn" not in low
+    assert "avaturn-sdk-container" not in r.text
+    assert "avatar3d" not in r.text  # manual .glb link form removed
+    assert "Build your creature" not in r.text
+    assert "builder-wrap" not in r.text
+    assert "avatar_builder" not in r.text
+    assert "Avatar (square JPG/PNG" in r.text  # 2D upload still there
 
 
 # ---------------------------------------------------------------- crew page
@@ -117,9 +83,21 @@ def test_crew_page_public_and_lists_3d_users():
     r = c.get("/crew")
     assert r.status_code == 200
     assert "3D Crew" in r.text
-    # carol3d saved a 3D avatar in the earlier test (same throwaway DB).
+    # Seed a 3D avatar directly: the generic GLB viewer path must still work
+    # for already-saved avatar_3d_url values.
+    _register(c, "carol3d")
+    async def seed():
+        db = await aiosqlite.connect(DB_PATH)
+        await db.execute(
+            "UPDATE users SET avatar_3d_url = ? WHERE username = ?",
+            ("https://assets.avaturn.me/abc123.glb", "carol3d"))
+        await db.commit()
+        await db.close()
+    asyncio.run(seed())
+    r = c.get("/crew")
+    assert r.status_code == 200
     assert "carol3d" in r.text
-    assert GOOD_URL in r.text
+    assert "https://assets.avaturn.me/abc123.glb" in r.text
 
 
 def test_crew_page_empty_state():
@@ -140,3 +118,4 @@ def test_crew_page_empty_state():
     finally:
         dbmod.DB_PATH = old_path
         shutil.rmtree(d2, ignore_errors=True)
+

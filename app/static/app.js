@@ -43,3 +43,15 @@
     setInterval(poll, 5000);
   }
 })();
+  // Bottom tab bar: highlight the current section.
+  (function () {
+    var path = window.location.pathname;
+    document.querySelectorAll(".tabbar a").forEach(function (a) {
+      var tab = a.getAttribute("data-tab");
+      var on = false;
+      if (tab === "feed") on = (path === "/feed" || path === "/");
+      else if (tab === "profile") on = (path.indexOf("/u/") === 0);
+      else on = (path === "/" + tab || path.indexOf("/" + tab + "/") === 0);
+      if (on) a.classList.add("on");
+    });
+  })();

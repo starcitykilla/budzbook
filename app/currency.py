@@ -147,6 +147,32 @@ async def claim_daily(db, user_id):
     return True, f"Claimed {DAILY_CLAIM_AMOUNT} {base['icon']}{base['code']} — see you tomorrow."
 
 
+WELCOME_BONUS_BUDZ = 100  # one-time grant for brand-new accounts
+
+
+async def grant_welcome_bonus(db, user_id):
+    """One-time welcome bonus for a brand-new account.
+
+    Idempotent: skips when the user already has a base-currency wallet or a
+    prior 'welcome bonus' txn, so it never double-grants.
+    """
+    base = await get_base_currency(db)
+    if not base:
+        return False
+    cur = await db.execute(
+        "SELECT 1 FROM wallets WHERE user_id = ? AND currency_id = ?",
+        (user_id, base["id"]))
+    if await cur.fetchone():
+        return False
+    cur = await db.execute(
+        "SELECT 1 FROM currency_txns WHERE user_id = ? AND reason = 'welcome bonus'",
+        (user_id,))
+    if await cur.fetchone():
+        return False
+    await award(db, user_id, base["code"], WELCOME_BONUS_BUDZ, "welcome bonus")
+    return True
+
+
 async def get_shop_items(db):
     cur = await db.execute(
         """SELECT s.*, c.code AS currency_code, c.icon AS currency_icon

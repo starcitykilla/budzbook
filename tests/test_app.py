@@ -15,6 +15,23 @@ os.environ["THC_SOCIAL_MEDIA"] = os.path.join(_tmp, "media")
 os.makedirs(os.path.join(_tmp, "media", "avatars"), exist_ok=True)
 os.makedirs(os.path.join(_tmp, "media", "posts"), exist_ok=True)
 
+# Hermetic casino DB for leaderboard tests (the adapter reads CASINO_DB at
+# call time; production default is the bot's live cannabet.db).
+_casino_db = os.path.join(_tmp, "casino.db")
+os.environ["CASINO_DB"] = _casino_db
+
+
+def _make_casino_db(rows):
+    import sqlite3
+    if os.path.exists(_casino_db):
+        os.remove(_casino_db)
+    c = sqlite3.connect(_casino_db)
+    c.execute("CREATE TABLE users (username TEXT PRIMARY KEY,"
+              " balance INTEGER NOT NULL DEFAULT 0)")
+    c.executemany("INSERT INTO users (username, balance) VALUES (?, ?)", rows)
+    c.commit()
+    c.close()
+
 import aiosqlite  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from PIL import Image  # noqa: E402
@@ -118,9 +135,12 @@ def test_post_like_comment_delete():
 
 def test_post_too_long_rejected():
     _login("alice")
-    r = client.post("/post", data={"body": "x" * 281, "kind": "post"},
+    r = client.post("/post", data={"body": "x" * 1000, "kind": "post"},
                     follow_redirects=False)
-    assert r.status_code == 303 and "280" in r.headers["location"]
+    assert r.status_code == 303  # exactly at the 1000-char cap: accepted
+    r = client.post("/post", data={"body": "x" * 1001, "kind": "post"},
+                    follow_redirects=False)
+    assert r.status_code == 303 and "1000" in r.headers["location"]
 
 
 # ---------------------------------------------------------------- social graph
@@ -233,5 +253,95 @@ def test_tiein_pages():
     for path in ("/leaderboard", "/sportsbook", "/grow"):
         r = client.get(path)
         assert r.status_code == 200, path
-    assert "Demo data" in client.get("/leaderboard").text
-    assert "krzy_budz" in client.get("/leaderboard").text
+    _make_casino_db([("stripemike", 2000), ("goldleaf", 750)])
+    r = client.get("/leaderboard")
+    assert "stripemike" in r.text and "2000" in r.text
+    assert "goldleaf" in r.text
+    assert "Demo data" not in r.text
+
+
+def test_watch_grid_page():
+    client.post("/logout", follow_redirects=False)
+    # anonymous -> redirected to login
+    r = client.get("/watch", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/login")
+    _register("watchfan")
+    _login("watchfan")
+    r = client.get("/watch")
+    assert r.status_code == 200, "/watch"
+    # followed-streams grid: card links to the per-channel player view
+    assert "Followed Streams" in r.text
+    assert "krzy_budz" in r.text
+    assert "/watch/krzy_budz" in r.text
+    # no Twitch creds in tests -> fail-soft offline cards
+    assert "OFFLINE" in r.text
+
+
+def test_watch_channel_player_embeds():
+    client.post("/logout", follow_redirects=False)
+    # anonymous -> redirected to login
+    r = client.get("/watch/krzy_budz", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/login")
+    _login("watchfan")
+    r = client.get("/watch/krzy_budz")
+    assert r.status_code == 200, "/watch/krzy_budz"
+    assert "player.twitch.tv" in r.text
+    assert "twitch.tv/embed/krzy_budz/chat" in r.text
+    assert "parent=budzbook.us" in r.text
+    assert "/watch" in r.text  # back link to the grid
+    # channel names are case-insensitive
+    r = client.get("/watch/KRZY_BUDZ")
+    assert r.status_code == 200
+    # unknown channel -> 404 page
+    r = client.get("/watch/not_a_real_channel_xyz")
+    assert r.status_code == 404
+
+
+def test_leaderboard_falls_back_to_demo():
+    _login("alice")
+    old = os.environ.get("CASINO_DB")
+    os.environ["CASINO_DB"] = os.path.join(_tmp, "nope.db")
+    try:
+        r = client.get("/leaderboard")
+        assert r.status_code == 200
+        assert "Demo data" in r.text
+        assert "krzy_budz" in r.text
+    finally:
+        if old is None:
+            del os.environ["CASINO_DB"]
+        else:
+            os.environ["CASINO_DB"] = old
+
+
+def test_welcome_bonus_on_register():
+    from app.currency import grant_welcome_bonus, WELCOME_BONUS_BUDZ
+    _register("newbie")
+    assert WELCOME_BONUS_BUDZ == 100
+
+    async def _bal_and_grant():
+        db = await aiosqlite.connect(DB_PATH)
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT id FROM users WHERE username = 'newbie'")
+        uid = (await cur.fetchone())[0]
+        cur = await db.execute(
+            "SELECT balance FROM wallets WHERE user_id = ?"
+            " AND currency_id = (SELECT id FROM currencies WHERE code = 'BUDZ')",
+            (uid,))
+        bal = (await cur.fetchone())[0]
+        again = await grant_welcome_bonus(db, uid)  # idempotent: no double-grant
+        cur = await db.execute(
+            "SELECT balance FROM wallets WHERE user_id = ?"
+            " AND currency_id = (SELECT id FROM currencies WHERE code = 'BUDZ')",
+            (uid,))
+        bal2 = (await cur.fetchone())[0]
+        cur = await db.execute(
+            "SELECT COUNT(*) FROM currency_txns WHERE user_id = ?"
+            " AND reason = 'welcome bonus'", (uid,))
+        n = (await cur.fetchone())[0]
+        await db.close()
+        return bal, again, bal2, n
+
+    bal, again, bal2, n = asyncio.run(_bal_and_grant())
+    assert bal == 100
+    assert again is False and bal2 == 100 and n == 1

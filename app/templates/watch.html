@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Watch - BudzBook{% endblock %}
+{% block content %}
+<h2>&#x1F4FA; Followed Streams</h2>
+<p>Streams from accounts Brad follows. Tap a card to open the player with live chat.</p>
+<div class="stream-grid">
+  {% for c in channels %}
+  <a class="stream-card{% if c.is_live %} live{% else %} offline{% endif %}" href="/watch/{{ c.login }}">
+    <div class="stream-thumb">
+      {% if c.is_live and c.thumbnail_url %}
+      <img src="{{ c.thumbnail_url }}" alt="{{ c.display_name }} live thumbnail" loading="lazy">
+      <span class="live-badge">LIVE</span>
+      {% else %}
+      {% if c.offline_image_url or c.profile_image_url %}
+      <img src="{{ c.offline_image_url or c.profile_image_url }}" alt="{{ c.display_name }} offline" loading="lazy" class="dimmed">
+      {% endif %}
+      <span class="offline-badge">OFFLINE</span>
+      {% endif %}
+    </div>
+    <div class="stream-meta">
+      <div class="stream-name">@{{ c.display_name }}</div>
+      {% if c.is_live %}
+      <div class="stream-title">{{ c.title }}</div>
+      <div class="stream-sub">{{ c.game_name }}{% if c.viewer_count %} &middot; {{ c.viewer_count }} watching{% endif %}</div>
+      {% else %}
+      <div class="stream-sub">Not streaming right now</div>
+      {% endif %}
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% endblock %}

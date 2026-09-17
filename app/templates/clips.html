@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Clips — BudzBook{% endblock %}
+{% block content %}
+<h2>🎬 Clips</h2>
+<p class="muted">Short videos from the community. Post one from the feed with 🎬.</p>
+{% for post in posts %}
+<div class="card clip-card">
+  <div class="post-head">
+    {% if post.avatar_approved %}
+      <img class="avatar sm {{ post.equipped_frame }}" src="/media/avatars/{{ post.username }}.jpg" alt="">
+    {% else %}
+      <span class="avatar sm fallback {{ post.equipped_frame }}">{{ post.display_name[0]|upper }}</span>
+    {% endif %}
+    <div>
+      <a class="who" href="/u/{{ post.username }}">{{ post.display_name }}</a>
+      <span class="uname">@{{ post.username }}</span>
+      <div class="when">{{ post.created_at|fdt }}</div>
+    </div>
+  </div>
+  {% if post.body %}<p class="post-body">{{ post.body|linkify }}</p>{% endif %}
+  <video class="clip-video" src="/media/{{ post.video_path }}" controls playsinline loop preload="metadata"></video>
+  <div class="post-actions">
+    <form method="post" action="/post/{{ post.id }}/like">
+      <button class="pill {% if post.liked %}on{% endif %}" type="submit">
+        {% if post.liked %}💚{% else %}🤍{% endif %} {{ post.like_count }}
+      </button>
+    </form>
+    <a class="pill ghost" href="/feed#post-{{ post.id }}">💬 {{ post.comment_count }}</a>
+  </div>
+</div>
+{% else %}
+  <div class="card muted">No clips yet — be the first. 🎬</div>
+{% endfor %}
+{% if has_more %}
+  <div class="center"><a class="btn ghost" href="/clips?page={{ page + 1 }}">Load more</a></div>
+{% endif %}
+{% endblock %}

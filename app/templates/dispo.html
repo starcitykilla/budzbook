@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Find a Dispo — BudzBook{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>📍 Find a Dispo</h2>
+  <p class="fine">The closest dispensaries to you. 21+ only — know your local laws and please consume responsibly.</p>
+  {% if not configured %}
+  <div class="card center">
+    <p class="big-emoji">🌿</p>
+    <p>The dispensary finder is being set up — check back soon.</p>
+  </div>
+  {% else %}
+  <div class="dispo-locate">
+    <button class="btn big" id="dispo-geo" type="button">📍 Use my location</button>
+    <div class="dispo-or fine">or enter a ZIP / city</div>
+    <form id="dispo-manual" class="dispo-manual" autocomplete="off">
+      <input id="dispo-q" type="text" placeholder="ZIP or city, state" maxlength="120" aria-label="ZIP or city">
+      <button class="btn" type="submit">Search</button>
+    </form>
+  </div>
+  <div id="dispo-status" class="fine dispo-status" role="status" aria-live="polite"></div>
+  <div id="dispo-results" class="dispo-results"></div>
+  <script>
+  (function () {
+    var statusEl = document.getElementById("dispo-status");
+    var resultsEl = document.getElementById("dispo-results");
+    function esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+        return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c];
+      });
+    }
+    function stars(rating) {
+      if (rating == null) return "";
+      var full = Math.round(rating);
+      var s = "";
+      for (var i = 0; i < 5; i++) s += i < full ? "★" : "☆";
+      return '<span class="stars" title="' + esc(rating) + ' / 5">' + s + "</span> " +
+             '<span class="fine">' + esc(rating) + "</span>";
+    }
+    function directionsUrl(d) {
+      var q = "https://www.google.com/maps/search/?api=1&query=" +
+              encodeURIComponent(d.name + " " + d.address);
+      if (d.place_id) q += "&query_place_id=" + encodeURIComponent(d.place_id);
+      return q;
+    }
+    function render(list) {
+      if (!list.length) {
+        resultsEl.innerHTML = '<p class="fine">No dispensaries found nearby. Try a different location.</p>';
+        return;
+      }
+      resultsEl.innerHTML = list.map(function (d) {
+        var dist = d.distance_mi != null ? esc(d.distance_mi) + " mi" : "";
+        var open = d.open_now === true
+          ? ' <span class="pill open-now">Open now</span>'
+          : d.open_now === false ? ' <span class="pill closed">Closed</span>' : "";
+        var ratings = d.ratings_total ? ' <span class="fine">(' + esc(d.ratings_total) + ")</span>" : "";
+        return '<div class="dispo-item">' +
+          '<div class="dispo-name">' + esc(d.name) + open + "</div>" +
+          '<div class="dispo-meta">' +
+            (dist ? '<span class="dispo-dist">' + dist + "</span> · " : "") +
+            esc(d.address) +
+          "</div>" +
+          '<div class="dispo-meta">' + stars(d.rating) + ratings + "</div>" +
+          '<a class="pill" target="_blank" rel="noopener" href="' + esc(directionsUrl(d)) + '">🧭 Get directions</a>' +
+        "</div>";
+      }).join("");
+    }
+    async function search(lat, lng, label) {
+      statusEl.textContent = "Searching near " + label + "…";
+      resultsEl.innerHTML = "";
+      try {
+        var r = await fetch("/api/dispo/search?lat=" + encodeURIComponent(lat) +
+                            "&lng=" + encodeURIComponent(lng));
+        var body = await r.json();
+        if (!r.ok) throw new Error(body.error || "Search failed");
+        statusEl.textContent = body.results.length
+          ? "Closest dispensaries near " + label + ":"
+          : "";
+        render(body.results);
+      } catch (e) {
+        statusEl.textContent = "Hmm, that didn't work — " + e.message + ". Try again.";
+      }
+    }
+    document.getElementById("dispo-geo").addEventListener("click", function () {
+      if (!navigator.geolocation) {
+        statusEl.textContent = "Your browser doesn't support location — type your ZIP or city below.";
+        return;
+      }
+      statusEl.textContent = "Asking for your location…";
+      navigator.geolocation.getCurrentPosition(function (pos) {
+        search(pos.coords.latitude, pos.coords.longitude, "you");
+      }, function () {
+        statusEl.textContent = "Location access was blocked — no worries, just type your ZIP or city below instead.";
+      }, { timeout: 12000, maximumAge: 600000 });
+    });
+    document.getElementById("dispo-manual").addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var q = document.getElementById("dispo-q").value.trim();
+      if (!q) return;
+      statusEl.textContent = "Looking up " + q + "…";
+      fetch("/api/dispo/geocode?q=" + encodeURIComponent(q))
+        .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, b: b }; }); })
+        .then(function (x) {
+          if (!x.ok || x.b.lat == null) throw new Error(x.b.error || "Location not found");
+          search(x.b.lat, x.b.lng, x.b.formatted || q);
+        })
+        .catch(function (e) {
+          statusEl.textContent = "Couldn't find that place — " + e.message + ".";
+        });
+    });
+  })();
+  </script>
+  {% endif %}
+</div>
+{% endblock %}

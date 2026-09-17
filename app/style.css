@@ -202,3 +202,38 @@ a.convo:hover { text-decoration: none; border-color: var(--green-dim); }
 .bmg-vip-badge{background:linear-gradient(135deg,#5a6472,#eef2f8 60%,#9aa5b5);
   color:#141a24;font-weight:700;border:1px solid #7c8798;cursor:default;
   text-transform:uppercase;letter-spacing:.4px;font-size:12px}
+
+/* --- GIF comments --- */
+.comment-gif { display:block; max-width:220px; border-radius:10px; margin:6px 0 2px; }
+.gif-preview { margin:6px 0; display:flex; gap:8px; align-items:center; }
+.gif-preview img { max-width:160px; border-radius:8px; }
+.gif-modal { position:fixed; inset:0; z-index:50; background:rgba(0,0,0,.72);
+  display:flex; align-items:center; justify-content:center; padding:16px; }
+.gif-modal[hidden] { display:none; }
+.gif-modal-card { width:min(560px,100%); max-height:82vh; display:flex; flex-direction:column;
+  background:var(--card); border:2px solid var(--gold); border-radius:var(--radius); overflow:hidden; }
+.gif-modal-head { display:flex; gap:8px; padding:10px; border-bottom:1px solid var(--line); }
+.gif-modal-head input { flex:1; padding:9px; font-size:15px; background:var(--card2);
+  border:1px solid var(--line); border-radius:10px; color:var(--text); }
+.gif-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; padding:10px; overflow-y:auto; }
+.gif-thumb { width:100%; border-radius:8px; cursor:pointer; border:2px solid transparent; }
+.gif-thumb:hover { border-color:var(--gold); }
+/* --- profile look --- */
+.swatches { display:flex; gap:10px; flex-wrap:wrap; margin:8px 0 12px; }
+.swatch input { display:none; }
+.swatch span { display:block; width:42px; height:42px; border-radius:50%; cursor:pointer;
+  border:3px solid transparent; }
+.swatch input:checked + span { border-color:#fff; box-shadow:0 0 0 2px var(--gold); }
+.swatch.none span { width:auto; height:42px; padding:0 14px; border-radius:21px; background:var(--card2);
+  color:var(--muted); display:flex; align-items:center; font-size:14px; font-weight:600; }
+.profile-banner { height:120px; border-radius:var(--radius) var(--radius) 0 0;
+  background-size:cover; background-position:center;
+  margin:-14px -14px 12px; border-bottom:2px solid var(--gold); }
+.banner-preview { width:100%; max-height:120px; object-fit:cover; border-radius:10px; }
+/* --- feed --- */
+.feed-head { display:flex; align-items:center; justify-content:space-between; margin:2px 2px 10px; }
+.feed-head h2 { margin:0; font-size:20px; }
+.iconbtn { font-size:22px; padding:6px 10px; border-radius:10px; line-height:1; }
+.iconbtn:hover { background:var(--card2); text-decoration:none; }
+.form label.radio, .form label.check { display:flex; align-items:center; gap:8px; font-weight:600; }
+.form label.radio input, .form label.check input { width:auto; margin:0; }
