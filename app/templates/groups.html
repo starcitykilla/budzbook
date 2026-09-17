@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Groups — BudzBook{% endblock %}
+{% block content %}
+<h2>👥 Groups</h2>
+<div class="card">
+  <h3>Start a group</h3>
+  <form method="post" action="/groups" class="form">
+    <label>Name <input name="name" maxlength="60" required placeholder="e.g. Indica Insiders"></label>
+    <label>Description <input name="description" maxlength="500" placeholder="What's this group about?"></label>
+    <button class="btn" type="submit">Create group</button>
+  </form>
+</div>
+{% for g in groups %}
+  <a class="card group-card" href="/groups/{{ g.id }}">
+    <b>{{ g.name }}</b>
+    <span class="muted">{{ g.member_count }} member{{ 's' if g.member_count != 1 }} · by @{{ g.owner_name }}</span>
+    {% if g.description %}<div class="small muted">{{ g.description }}</div>{% endif %}
+    {% if g.is_member %}<span class="tag">joined</span>{% endif %}
+  </a>
+{% else %}
+  <div class="card muted">No groups yet — start the first one. 🌿</div>
+{% endfor %}
+{% endblock %}

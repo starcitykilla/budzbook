@@ -28,21 +28,6 @@ from app.main import app  # noqa: E402
 asyncio.run(init_db())
 
 
-async def _seed_base_currency():
-    """The gear shelf seeds during _migrate, which needs the base currency
-    to exist first — so seed BUDZ, then re-run init_db."""
-    from datetime import datetime, timezone  # noqa: E402
-    db = await aiosqlite.connect(DB_PATH)
-    now = datetime.now(timezone.utc).isoformat()
-    await db.execute(
-        "INSERT INTO currencies (code, name, owner, icon, rate_to_base, is_base,"
-        " created_at) VALUES ('BUDZ', 'Budz', 'krzy_budz', '🌿', 1.0, 1, ?)",
-        (now,))
-    await db.commit()
-    await db.close()
-
-
-asyncio.run(_seed_base_currency())
 asyncio.run(init_db())
 
 RESULTS = []

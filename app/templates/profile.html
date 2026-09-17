@@ -1,13 +1,26 @@
 {% extends "base.html" %}
 {% block title %}@{{ profile.username }} — BudzBook{% endblock %}
 {% block content %}
+{% if profile.theme_color %}
+<style>
+.profile-card { --theme: {{ profile.theme_color }}; }
+.profile-card a, .profile-card .who, .profile-card .counts b { color: var(--theme); }
+.profile-card .btn { border-color: var(--theme); }
+.profile-card .pill { border-color: var(--theme); }
+</style>
+{% endif %}
 <div class="card profile-card">
+  {% if profile.banner_path %}<div class="profile-banner" style="background-image:url('/media/{{ profile.banner_path }}')"></div>{% endif %}
   <div class="profile-top">
-    {% if profile.avatar_3d_url %}
+    {% if profile.figurine %}
+      <div class="figurine {{ profile.equipped_frame }}" data-png="/media/figurines/{{ profile.username }}.png" data-json="/media/figurines/{{ profile.username }}.json" title="Drag to spin">
+        <img class="figurine-fallback" src="/media/figurines/{{ profile.username }}.png" alt="Profile avatar">
+      </div>
+    {% elif profile.avatar_3d_url %}
       <div class="avatar3d {{ profile.equipped_frame }}" data-url="{{ profile.avatar_3d_url }}"
         title="Drag to spin it · scroll to zoom · click for a hop"></div>
-    {% elif profile.avatar_approved %}
-      <img class="avatar lg {{ profile.equipped_frame }}" src="/media/avatars/{{ profile.username }}.jpg" alt="">
+    {% elif profile.avatar_approved and profile.has_avatar %}
+      <img class="avatar lg {{ profile.equipped_frame }}" src="/media/avatars/{{ profile.username }}.jpg" alt="Profile avatar">
     {% else %}
       <span class="avatar lg fallback {{ profile.equipped_frame }}">{{ profile.display_name[0]|upper }}</span>
     {% endif %}
@@ -36,7 +49,7 @@
         <a class="btn ghost" href="/messages/{{ profile.username }}">✉️ DM</a>
       </div>
     {% elif user %}
-      <div class="profile-act"><a class="btn ghost" href="/settings">Edit profile</a></div>
+      <div class="profile-act"><a class="btn ghost" href="/settings">Edit profile</a> <a class="iconbtn" href="/settings#profile-look" title="Customize your profile">⚙️</a></div>
     {% endif %}
   </div>
   {% if profile.bio %}<p class="bio">{{ profile.bio }}</p>{% endif %}
@@ -60,5 +73,7 @@
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
 }}
 </script>
-<script type="module" src="/static/js/avatar3d.js"></script>
+<script type="module" src="/static/js/avatar3d.js?v=20260916f"></script>
+<script type="module" src="/static/js/figurine.js?v=20260916f"></script>
 {% endblock %}
+

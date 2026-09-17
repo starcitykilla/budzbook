@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Settings — BudzBook{% endblock %}
+
 {% block content %}
 <div class="card narrow">
   <h2>Profile settings</h2>
@@ -23,28 +24,49 @@
         <span class="muted">{% if user.avatar_approved %}✅ approved for stream{% else %}⏳ pending mod approval{% endif %}</span>
       </div>
     {% endif %}
+    <hr class="sep">
+    <h3 id="profile-look">🎨 Profile look</h3>
+    <p class="muted">Pick an accent color and an optional banner for your profile page.</p>
+    <div class="swatches">
+      {% for sw in swatches %}
+      <label class="swatch" title="{{ sw }}">
+        <input type="radio" name="theme_color" value="{{ sw }}"{% if user.theme_color == sw %} checked{% endif %}>
+        <span style="background:{{ sw }}"></span>
+      </label>
+      {% endfor %}
+      <label class="swatch none" title="Default">
+        <input type="radio" name="theme_color" value=""{% if not user.theme_color %} checked{% endif %}>
+        <span>Default</span>
+      </label>
+    </div>
+    <label>Profile banner (wide JPG/PNG, cropped to 1200x300)
+      <input type="file" name="banner" accept="image/jpeg,image/png"></label>
+    {% if user.banner_path %}
+      <div class="row"><img class="banner-preview" src="/media/{{ user.banner_path }}" alt="current banner"></div>
+    {% endif %}
+    <hr class="sep">
+    <h3 id="feed">📰 Feed</h3>
+    <p class="muted">How your feed looks.</p>
+    <div class="row" style="margin-bottom:12px">
+      <label class="radio"><input type="radio" name="feed_sort" value="latest"{% if feed_prefs.sort != 'top' %} checked{% endif %}> Latest</label>
+      <label class="radio"><input type="radio" name="feed_sort" value="top"{% if feed_prefs.sort == 'top' %} checked{% endif %}> Top liked</label>
+    </div>
+    <label class="check"><input type="checkbox" name="feed_show_reshares"{% if feed_prefs.show_reshares %} checked{% endif %}> Show reshares</label>
+    <label>Muted words (comma-separated - posts with these words stay out of your feed)
+      <input name="feed_muted_words" maxlength="500" value="{{ feed_prefs.muted_words_raw }}" placeholder="spoilers, drama"></label>
     <button class="btn big" type="submit">Save</button>
   </form>
-  <hr class="sep">
-  <h3>3D avatar</h3>
-  {% if user.avatar_3d_url %}
-    <p class="muted">✅ 3D avatar saved — it shows on your profile and the <a href="/crew">3D Crew</a> page.</p>
-    <button class="btn" id="rpm-open" type="button">Make a new 3D avatar</button>
-  {% else %}
-    <p class="muted">Create a 3D avatar that you can spin around — it shows on your profile and the <a href="/crew">3D Crew</a> page.</p>
-    <button class="btn" id="rpm-open" type="button">Create your 3D avatar</button>
-  {% endif %}
-  <div class="rpm-modal" id="rpm-modal" hidden>
-    <div class="rpm-modal-head">
-      <span>Create your 3D avatar</span>
-      <button class="btn ghost sm" id="rpm-close" type="button">✕ Close</button>
-    </div>
-    <iframe id="rpm-frame" title="Ready Player Me avatar creator"
-      src="https://{{ rpm_subdomain }}.readyplayer.me/avatar?frameApi"></iframe>
-  </div>
   <p class="muted">Avatars are square-cropped to 512px. A mod approves them before
   they can appear on Brad's stream overlays.</p>
-  <hr class="sep">
+    <hr class="sep">
+  <h3>Change password</h3>
+  <form method="post" action="/settings/password" class="form">
+    <label>Current password <input type="password" name="current_password" autocomplete="current-password"></label>
+    <label>New password (at least 6 characters) <input type="password" name="new_password" autocomplete="new-password"></label>
+    <label>Confirm new password <input type="password" name="confirm_password" autocomplete="new-password"></label>
+    <button class="btn" type="submit">Change password</button>
+  </form>
+<hr class="sep">
   <h3>🧢 Your gear</h3>
   {% set gear_items = inventory | selectattr("kind", "equalto", "gear") | list %}
   {% if gear_items %}
@@ -63,42 +85,6 @@
     <p class="muted">No gear yet — grab a fitted or a jersey in the <a href="/shop">shop</a> or with <code>$buy</code> in chat.</p>
   {% endif %}
 </div>
-<script>
-(function () {
-  var modal = document.getElementById("rpm-modal");
-  var frame = document.getElementById("rpm-frame");
-  document.getElementById("rpm-open").addEventListener("click", function () {
-    modal.hidden = false;
-    document.body.style.overflow = "hidden";
-  });
-  document.getElementById("rpm-close").addEventListener("click", function () {
-    modal.hidden = true;
-    document.body.style.overflow = "";
-  });
-  window.addEventListener("message", function (event) {
-    var origin = event.origin || "";
-    if (origin.slice(-16) !== ".readyplayer.me" && origin !== "https://readyplayer.me") return;
-    var data;
-    try { data = JSON.parse(event.data); } catch (e) { return; }
-    if (!data || data.source !== "readyplayerme") return;
-    if (data.eventName === "v1.frame.ready") {
-      frame.contentWindow.postMessage(JSON.stringify({
-        target: "readyplayerme", type: "subscribe", eventName: "v1.**"
-      }), "*");
-    } else if (data.eventName === "v1.avatar.exported") {
-      var url = data.data && data.data.url;
-      if (!url) return;
-      fetch("/settings/avatar3d", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "avatar_url=" + encodeURIComponent(url)
-      }).then(function () {
-        modal.hidden = true;
-        document.body.style.overflow = "";
-        location.reload();
-      });
-    }
-  });
-})();
-</script>
+
 {% endblock %}
+

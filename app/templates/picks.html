@@ -37,6 +37,45 @@
   </div>
   {% endif %}
 
+  {% if picks.recap %}
+  <div class="card recap-card">
+    <h3>📋 Yesterday's recap</h3>
+    {% for t in picks.recap.tickets %}
+    <div class="recap-ticket">
+      <div class="pick-line">
+        {% if t.result == 'win' %}✅{% elif t.result == 'bust' %}❌{% elif t.result == 'push' %}🤝{% elif t.result == 'void' %}🚫{% else %}⏳{% endif %}
+        <b>{{ t.name }}</b> — {{ t.result|upper }}
+        <span class="odds">{{ t.combined_odds }}</span>
+      </div>
+      <ul class="parlay-legs">
+        {% for leg in t.legs %}
+        <li>
+          {{ leg.desc }}
+          {% if leg.leg_result == 'win' %}✅{% elif leg.leg_result == 'loss' %}❌{% elif leg.leg_result == 'push' %}🤝{% elif leg.leg_result == 'void' %}🚫{% else %}⏳{% endif %}
+          {% if leg.final %}<span class="fine">{{ leg.final }}</span>{% endif %}
+          {% if leg.analysis %}<div class="fine">{{ leg.analysis }}</div>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endfor %}
+    <div class="parlay-line">Running record: <b>{{ picks.recap.record.wins }}-{{ picks.recap.record.losses }}</b>
+      <span class="odds">{% if picks.recap.record.net_budz >= 0 %}+{% endif %}{{ picks.recap.record.net_budz }} BUDZ</span></div>
+  </div>
+  {% endif %}
+
+  {% for t in picks.tickets %}
+  <div class="card parlay-card">
+    <h3>🎟️ {{ t.name }}</h3>
+    {% if t.tagline %}<p class="fine">{{ t.tagline }}</p>{% endif %}
+    <ul class="parlay-legs">
+      {% for leg in t.legs %}<li>{{ leg.desc }} <span class="fine">{{ leg.tip }}</span></li>{% endfor %}
+    </ul>
+    <div class="parlay-line">Combined odds: <b>{{ t.combined_odds }}</b></div>
+    <div class="parlay-line">Suggested stake: <b>{{ t.stake_budz }} BUDZ</b> <span class="fine">(play money)</span></div>
+  </div>
+  {% endfor %}
+
   <p class="fine">Budz Picks are leans, not locks — for fun and play-money BUDZ only. 21+. Please consume responsibly.</p>
 </div>
 {% endblock %}

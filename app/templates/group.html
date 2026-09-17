@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ group.name }} — BudzBook{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>👥 {{ group.name }}</h2>
+  {% if group.description %}<p class="muted">{{ group.description }}</p>{% endif %}
+  <p class="small muted">{{ group.member_count }} member{{ 's' if group.member_count != 1 }} · started by @{{ group.owner_name }}</p>
+  {% if group.is_member %}
+    <form method="post" action="/groups/{{ group.id }}/leave" style="display:inline">
+      <button class="btn ghost sm" type="submit">Leave group</button>
+    </form>
+  {% else %}
+    <form method="post" action="/groups/{{ group.id }}/join" style="display:inline">
+      <button class="btn sm" type="submit">Join group</button>
+    </form>
+  {% endif %}
+</div>
+{% if group.is_member %}
+<div class="composer card">
+  <form method="post" action="/post" enctype="multipart/form-data" class="form">
+    <input type="hidden" name="group_id" value="{{ group.id }}">
+    <textarea name="body" maxlength="280" rows="3" required
+      placeholder="Post to {{ group.name }}…"></textarea>
+    <div class="row">
+      <label class="filebtn">📷 <input type="file" name="image" accept="image/*" hidden></label>
+      <label class="filebtn">🎬 <input type="file" name="video" accept="video/*" hidden></label>
+      <button class="btn" type="submit">Post</button>
+    </div>
+  </form>
+</div>
+{% endif %}
+{% for post in posts %}
+  {% include "_post.html" %}
+{% else %}
+  <div class="card muted">No posts yet — say something. 🌿</div>
+{% endfor %}
+{% if has_more %}
+  <div class="center"><a class="btn ghost" href="/groups/{{ group.id }}?page={{ page + 1 }}">Load more</a></div>
+{% endif %}
+{% endblock %}

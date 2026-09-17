@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{% block title %}BudzBook{% endblock %}</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=20260917a">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#0d1512">
 <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
@@ -18,10 +18,15 @@
   <nav class="nav">
     {% if user %}
       <a href="/feed">Feed</a>
+      <a href="/watch" title="Watch the stream">&#x1F4FA;</a>
       <a href="/leaderboard" title="Casino leaderboard">🏆</a>
       <a href="/sportsbook" title="Budz Book">📖</a>
       <a href="/picks" title="Budz Picks">🎯</a>
+      <a href="/trending" title="Trending">📈</a>
+      <a href="/groups" title="Groups">👥</a>
+      <a href="/clips" title="Clips">🎬</a>
       <a href="/grow" title="Grow journal">🌱</a>
+      <a href="/dispo" title="Find a dispensary">📍</a>
       <a href="/crew" title="3D Crew">🧍</a>
       <a href="/wallet" title="Wallet">💰</a>
       <a href="/messages" title="Messages">✉️</a>
@@ -36,12 +41,16 @@
     {% endif %}
   </nav>
 </header>
+<div id="score-ticker" class="ticker" hidden aria-label="Live scores and lines">
+  <div class="ticker-line"><div class="ticker-track" id="ticker-track-scores"></div></div>
+  <div class="ticker-line ticker-line-dim"><div class="ticker-track" id="ticker-track-lines"></div></div>
+</div>
 <main class="wrap">
   {% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
   {% block content %}{% endblock %}
 </main>
 <footer class="foot">BudzBook · 21+ cannabis community · please consume responsibly 🌿</footer>
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=20260916f"></script>
 <script>
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", function () {
@@ -49,5 +58,100 @@ if ("serviceWorker" in navigator) {
   });
 }
 </script>
+{% if user %}
+<nav class="tabbar" aria-label="Primary">
+  <a href="/feed" data-tab="feed"><span class="ti">🏠</span><span class="tl">Feed</span></a>
+  <a href="/watch" data-tab="watch"><span class="ti">📺</span><span class="tl">Watch</span></a>
+  <a href="/leaderboard" data-tab="leaderboard"><span class="ti">🏆</span><span class="tl">Board</span></a>
+  <a href="/picks" data-tab="picks"><span class="ti">🎯</span><span class="tl">Picks</span></a>
+  <a href="/dispo" data-tab="dispo"><span class="ti">📍</span><span class="tl">Dispo</span></a>
+  <a href="/wallet" data-tab="wallet"><span class="ti">👛</span><span class="tl">Wallet</span></a>
+  <a href="/u/{{ user.username }}" data-tab="profile"><span class="ti">👤</span><span class="tl">You</span></a>
+</nav>
+{% endif %}
+<script>
+(function () {
+  var EMOJI = { NFL: "\uD83C\uDFC8", NBA: "\uD83C\uDFC0", MLB: "\u26BE", NHL: "\uD83C\uDFD2" };
+  function fmtSpread(g) {
+    if (g.spread == null) return "";
+    var fav = g.spread <= 0 ? g.home : g.away;
+    var line = g.spread <= 0 ? g.spread : -g.spread;
+    return " \u00B7 " + fav.abbr + " " + line;
+  }
+  function coverTag(g, verb) {
+    if (g.spread == null || !g.covering) return "";
+    if (g.covering === "push") return ' \u00B7 <span class="push">push</span>';
+    var t = g.covering === "home" ? g.home : g.away;
+    return ' \u00B7 <span class="cover">' + t.abbr + " " + verb + "</span>";
+  }
+  function fmtDate(iso) {
+    try {
+      var d = new Date(iso);
+      return d.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+    } catch (e) { return ""; }
+  }
+  function sc(g) {
+    return g.away.abbr + " " + g.away.score + " @ " + g.home.abbr + " " + g.home.score;
+  }
+  function scoreItem(g) {
+    var em = EMOJI[g.league] || "\uD83C\uDFDF";
+    var html;
+    if (g.state === "in") {
+      var clk = g.clock || (g.period ? "P" + g.period : "");
+      html = em + ' <b class="live">LIVE</b> ' + clk + " \u00B7 " + sc(g);
+    } else if (g.state === "post") {
+      html = em + " F \u00B7 " + sc(g);
+    } else {
+      var when = g.detail || fmtDate(g.date);
+      html = em + " " + when + " \u00B7 " + g.away.abbr + " @ " + g.home.abbr;
+    }
+    return '<span class="ticker-item">' + html + "</span>";
+  }
+  function lineItem(g) {
+    if (g.spread == null) return "";
+    var em = EMOJI[g.league] || "\uD83C\uDFDF";
+    var mu = g.away.abbr + " @ " + g.home.abbr;
+    var html;
+    if (g.state === "in") {
+      html = em + " " + mu + fmtSpread(g) + coverTag(g, "covering");
+    } else if (g.state === "post") {
+      html = em + " F " + mu + fmtSpread(g) + coverTag(g, "covered \u2713");
+    } else {
+      var when = g.detail || fmtDate(g.date);
+      html = em + " " + when + " " + mu + fmtSpread(g);
+    }
+    return '<span class="ticker-item">' + html + "</span>";
+  }
+  function setTrack(id, itemsHtml) {
+    var track = document.getElementById(id);
+    if (!track) return;
+    var half = itemsHtml.join('<span class="tick-sep">\u2022</span>');
+    track.innerHTML = half + '<span class="tick-sep">\u2022</span>' + half;
+  }
+  function render(games) {
+    var bar = document.getElementById("score-ticker");
+    if (!bar || !games || !games.length) return;
+    var order = { in: 0, pre: 1, post: 2 };
+    games = games.slice().sort(function (a, b) {
+      return (order[a.state] - order[b.state]) || (a.league < b.league ? -1 : 1);
+    }).slice(0, 16);
+    setTrack("ticker-track-scores", games.map(scoreItem));
+    var lines = games.map(lineItem).filter(function (s) { return s; });
+    var link = '<span class="ticker-item ticker-link"><a href="/sportsbook">\uD83D\uDCD6 lines</a></span>';
+    setTrack("ticker-track-lines", [link].concat(lines));
+    bar.hidden = false;
+    document.body.classList.add("has-ticker");
+  }
+  async function load() {
+    try {
+      var r = await fetch("/ticker.json", { cache: "no-store" });
+      if (r.ok) render(await r.json());
+    } catch (e) { /* ticker is decorative; never break the page */ }
+  }
+  load();
+  setInterval(load, 90000);
+})();
+</script>
+
 </body>
 </html>

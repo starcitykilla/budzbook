@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Trending — BudzBook{% endblock %}
+{% block content %}
+<h2>📈 Trending</h2>
+<p class="muted">What the community is talking about this week.</p>
+{% for t in tags %}
+  <a class="trend-row" href="/tag/{{ t.tag }}">
+    <span class="htag big">#{{ t.tag }}</span>
+    <span class="muted">{{ t.n }} post{{ 's' if t.n != 1 }}</span>
+  </a>
+{% else %}
+  <div class="card muted">No hashtags yet — start one with #something in a post. 🌿</div>
+{% endfor %}
+{% endblock %}

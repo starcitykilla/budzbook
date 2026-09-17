@@ -11,12 +11,16 @@
       <a class="who" href="/u/{{ post.username }}">{{ post.display_name }}</a>
       <span class="uname">@{{ post.username }}</span>
       {% if post.kind == 'grow' %}<span class="tag">🌱 grow</span>{% endif %}
+      {% if post.group_name %}<a class="tag group-tag" href="/groups/{{ post.group_id }}">👥 {{ post.group_name }}</a>{% endif %}
       <div class="when">{{ post.created_at|fdt }}</div>
     </div>
   </div>
-  <p class="post-body">{{ post.body }}</p>
+  <p class="post-body">{{ post.body|linkify }}</p>
   {% if post.image_path %}
     <img class="post-img" src="/media/{{ post.image_path }}" alt="post image" loading="lazy">
+  {% endif %}
+  {% if post.video_path %}
+    <video class="post-video" src="/media/{{ post.video_path }}" controls playsinline preload="metadata"></video>
   {% endif %}
   <div class="post-actions">
     <form method="post" action="/post/{{ post.id }}/like">
@@ -39,11 +43,92 @@
   <div class="comments">
     {% for c in post.comments %}
       <div class="comment"><b>{{ c.display_name }}</b> <span class="uname">@{{ c.username }}</span>
-        {{ c.body }}</div>
+        {{ c.body }}{% if c.gif_url %}<img class="comment-gif" src="{{ c.gif_url }}" alt="GIF" loading="lazy">{% endif %}</div>
     {% endfor %}
     <form class="comment-form" method="post" action="/post/{{ post.id }}/comment">
-      <input name="body" maxlength="500" placeholder="Write a comment…" required>
+      <input name="body" maxlength="500" placeholder="Write a comment…">
+      <input type="hidden" name="gif_url" id="cgif-{{ post.id }}" value="">
+      <button type="button" class="btn sm ghost gif-picker-btn" data-post="{{ post.id }}" title="Add a GIF">GIF</button>
       <button class="btn sm" type="submit">Reply</button>
     </form>
+    <div class="gif-preview" id="cgifprev-{{ post.id }}" hidden></div>
+    <div class="gif-modal" id="gifmodal-{{ post.id }}" hidden>
+      <div class="gif-modal-card">
+        <div class="gif-modal-head">
+          <input class="gif-q" data-post="{{ post.id }}" placeholder="Search GIFs…" maxlength="100">
+          <button type="button" class="btn sm gif-search-btn" data-post="{{ post.id }}">Search</button>
+          <button type="button" class="btn sm ghost gif-close-btn" data-post="{{ post.id }}">✕</button>
+        </div>
+        <div class="gif-grid" id="gifgrid-{{ post.id }}"></div>
+      </div>
+    </div>
   </div>
 </article>
+<script>
+/* GIF picker (Tenor). One delegated handler serves every comment form. */
+async function budzGifReady() {
+  if (window.__budzGifReady === undefined) {
+    try {
+      const r = await fetch('/api/gif/search?q=', {cache: 'no-store'});
+      window.__budzGifReady = r.ok;
+    } catch (e) { window.__budzGifReady = false; }
+    if (!window.__budzGifReady)
+      document.querySelectorAll('.gif-picker-btn').forEach(b => b.style.display = 'none');
+  }
+  return window.__budzGifReady;
+}
+async function budzGifSearch(pid, q) {
+  const grid = document.getElementById('gifgrid-' + pid);
+  grid.innerHTML = '<div class="muted">Loading…</div>';
+  try {
+    const r = await fetch('/api/gif/search?q=' + encodeURIComponent(q), {cache: 'no-store'});
+    if (!r.ok) throw 0;
+    const items = (await r.json()).results || [];
+    grid.innerHTML = items.length ? items.map(g =>
+      '<img class="gif-thumb" data-post="' + pid + '" data-url="' + g.url.replace(/"/g, '&quot;') +
+      '" src="' + g.preview.replace(/"/g, '&quot;') + '" loading="lazy" alt="GIF">').join('')
+      : '<div class="muted">No GIFs found.</div>';
+  } catch (e) {
+    grid.innerHTML = '<div class="muted">GIF search is unavailable right now.</div>';
+  }
+}
+function budzGifPick(pid, url) {
+  document.getElementById('cgif-' + pid).value = url;
+  const prev = document.getElementById('cgifprev-' + pid);
+  prev.hidden = false;
+  prev.innerHTML = '<img src="' + url.replace(/"/g, '&quot;') + '" alt="GIF"> ' +
+    '<button type="button" class="btn sm ghost" onclick="budzGifUnpick(' + pid + ')">Remove</button>';
+  document.getElementById('gifmodal-' + pid).hidden = true;
+}
+function budzGifUnpick(pid) {
+  document.getElementById('cgif-' + pid).value = '';
+  const prev = document.getElementById('cgifprev-' + pid);
+  prev.hidden = true; prev.innerHTML = '';
+}
+if (!window.__budzGifInit) {
+  window.__budzGifInit = true;
+  document.addEventListener('DOMContentLoaded', () => budzGifReady());
+  document.addEventListener('click', async (e) => {
+    const t = e.target.closest('.gif-picker-btn,.gif-search-btn,.gif-close-btn,.gif-thumb');
+    if (!t) return;
+    const pid = t.dataset.post;
+    if (t.classList.contains('gif-picker-btn')) {
+      if (!await budzGifReady()) return;
+      document.getElementById('gifmodal-' + pid).hidden = false;
+      budzGifSearch(pid, '');
+    } else if (t.classList.contains('gif-search-btn')) {
+      budzGifSearch(pid, document.querySelector('.gif-q[data-post="' + pid + '"]').value);
+    } else if (t.classList.contains('gif-close-btn')) {
+      document.getElementById('gifmodal-' + pid).hidden = true;
+    } else if (t.classList.contains('gif-thumb')) {
+      budzGifPick(pid, t.dataset.url);
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('gif-q')) {
+      e.preventDefault();
+      budzGifSearch(e.target.dataset.post, e.target.value);
+    }
+  });
+}
+</script>

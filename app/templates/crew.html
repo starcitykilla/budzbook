@@ -4,7 +4,7 @@
 <div class="card">
   <h2>The 3D Crew 🌿</h2>
   <p class="muted">Everyone with a 3D avatar. Drag one to spin it, scroll to zoom, click for a hop.
-  Want in? <a href="/settings">Create your 3D avatar</a>.</p>
+  Want in? <a href="/settings">Upload your avatar</a> — spinnable figurines are hand-made for special members.</p>
 </div>
 {% if crew %}
 <div class="crew-grid">
@@ -17,7 +17,7 @@
   {% endfor %}
 </div>
 {% else %}
-<div class="card muted">No 3D avatars yet — <a href="/settings">create yours in Settings</a> and be the first. 🌿</div>
+<div class="card muted">No 3D avatars yet — <a href="/settings">upload yours in Settings</a> and be the first. 🌿</div>
 {% endif %}
 <script type="importmap">
 {"imports": {
@@ -25,5 +25,5 @@
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
 }}
 </script>
-<script type="module" src="/static/js/avatar3d.js"></script>
+<script type="module" src="/static/js/avatar3d.js?v=20260916f"></script>
 {% endblock %}

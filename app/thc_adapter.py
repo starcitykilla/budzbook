@@ -4,8 +4,9 @@ V1 STATUS: **everything here returns MOCK data** so the site works standalone
 without Brad's stream PC. Each function documents exactly what to replace to
 go live:
 
-* Casino leaderboard -> read the real casino SQLite DB that the T.H.C.
-  ``the_botanist.py`` casino cog writes (player balances / win totals).
+* Casino leaderboard -> LIVE: reads the real casino SQLite DB
+  (thc-test/cannabet.db, written by ``the_botanist.py``). Falls back to
+  the mock board below if the DB can't be read.
 * Sportsbook lines   -> import ``sportsbook.get_all_games()`` from the T.H.C.
   codebase (same code that powers the ``$lines`` chat command) instead of the
   mock board below.
@@ -16,27 +17,53 @@ The page routes in ``main.py`` only ever talk to these functions, so swapping
 mock -> real is a one-file change.
 """
 
+import os
+import sqlite3
+
+
 # Flip to False once real data sources are wired up; pages show a
 # "demo data" badge while this is True.
 MOCK = True
 
 
-def get_casino_leaderboard(limit: int = 10):
-    """Top casino players by Budz balance.
+def _casino_db_path():
+    # Env override keeps tests hermetic; default is the bot's live casino DB.
+    return os.environ.get("CASINO_DB", r"C:\Users\Starc\thc-test\cannabet.db")
 
-    LIVE VERSION: query the THC casino DB, e.g.
-        SELECT username, balance FROM casino_players ORDER BY balance DESC
-    Return: [{"username": str, "budz": int, "wins": int}, ...]
-    """
+
+def _mock_leaderboard(limit: int = 10):
     board = [
         {"username": "krzy_budz", "budz": 2090, "wins": 34},
         {"username": "queenshida", "budz": 1875, "wins": 28},
+        {"username": "jarvis", "budz": 1750, "wins": 19},
         {"username": "powme0wpow", "budz": 1520, "wins": 21},
         {"username": "hoodzwtf", "budz": 1210, "wins": 17},
         {"username": "budtender_fan", "budz": 940, "wins": 12},
         {"username": "growmie42", "budz": 610, "wins": 8},
     ]
     return board[:limit]
+
+
+def get_casino_leaderboard(limit: int = 10):
+    """Top casino players by real chat-casino balance.
+
+    Returns (board, live). Live reads the T.H.C. bot's casino DB
+    (cannabet.db, written by the_botanist.py). The casino engine doesn't
+    track win counts, so live rows carry wins=None (rendered as "--").
+    On any read error it falls back to the mock board so the page never
+    breaks.
+    """
+    try:
+        conn = sqlite3.connect(_casino_db_path(), timeout=5)
+        try:
+            rows = conn.execute(
+                "SELECT username, balance FROM users ORDER BY balance DESC LIMIT ?",
+                (limit,)).fetchall()
+        finally:
+            conn.close()
+        return ([{"username": u, "budz": b, "wins": None} for u, b in rows], True)
+    except Exception:
+        return _mock_leaderboard(limit), False
 
 
 def get_sportsbook_lines():
