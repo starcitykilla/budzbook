@@ -262,6 +262,17 @@ async def _migrate_social(db) -> None:
     await db.execute("""CREATE TABLE IF NOT EXISTS golive_posts (
         stream_id TEXT PRIMARY KEY, post_id INTEGER NOT NULL,
         created_at TEXT NOT NULL)""")
+    # --- Knight & Crown game hub (2026-09-18): heirs link their BudzBook
+    # account to a resonance-backend player. One heir per user.
+    await db.execute("""CREATE TABLE IF NOT EXISTS game_heirs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL UNIQUE,
+        player_id INTEGER NOT NULL,
+        player_token TEXT NOT NULL,
+        heir_name TEXT NOT NULL,
+        antenna TEXT NOT NULL,
+        polymath TEXT NOT NULL,
+        created_at TEXT NOT NULL)""")
     await db.execute(
         "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
     for table, coldef in (("posts", "group_id INTEGER"),
