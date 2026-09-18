@@ -552,3 +552,8 @@ body.has-ticker .topbar { top: 50px; }
 .stream-name{font-weight:800;color:var(--gold)}
 .stream-title{font-size:14px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stream-sub{font-size:12px;color:var(--muted);margin-top:2px}
+/* Double-submit guard: submitted buttons go quiet while the request flies. */
+button[type="submit"]:disabled, input[type="submit"]:disabled {
+  opacity: .55;
+  cursor: wait;
+}
