@@ -44,7 +44,7 @@ from . import ticker
 from .auth import (AGE_COOKIE, SESSION_COOKIE, hash_password, make_age_token,
                    make_session_token, read_age_token, read_session_token,
                    verify_password)
-from .db import (AVATAR_DIR, BANNER_DIR, COMMENT_IMG_DIR, FIGURINE_DIR, MEDIA_DIR, POST_IMG_DIR, avatar_exists,
+from .db import (AVATAR_DIR, BANNER_DIR, COMMENT_IMG_DIR, DB_PATH, FIGURINE_DIR, MEDIA_DIR, POST_IMG_DIR, avatar_exists,
                  avatar_path_for, figurine_exists, get_db, init_db)
 from . import twitch_oauth
 from .twitch_oauth import (authorize_url, configured as twitch_configured,
@@ -91,6 +91,39 @@ app = FastAPI(title="BudzBook", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "app", "static")), name="static")
 app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
 HASHTAG_RE = re.compile(r"#(\w+)")
+# @mentions: ASCII word chars only (usernames are ^[A-Za-z0-9_]{3,20}$).
+# Scanned together with hashtags in one pass inside linkify_tags().
+MENTION_RE = re.compile(r"@([A-Za-z0-9_]{1,20})")
+_TOKEN_RE = re.compile(r"#(\w+)|@([A-Za-z0-9_]{1,20})")
+
+# TTL-cached set of existing usernames (lowercased) so @mention linkification
+# stays a cheap set lookup at render time instead of a DB hit per post.
+_MENTION_CACHE = {"at": 0.0, "names": frozenset()}
+_MENTION_CACHE_TTL = 60.0
+
+
+def _mention_usernames():
+    """Lowercased set of all usernames. Falls back to the last good set on error."""
+    import sqlite3 as _sqlite3
+    import time as _time
+    now = _time.monotonic()
+    if now - _MENTION_CACHE["at"] < _MENTION_CACHE_TTL:
+        return _MENTION_CACHE["names"]
+    names = _MENTION_CACHE["names"]
+    try:
+        con = _sqlite3.connect(DB_PATH, timeout=10)
+        try:
+            names = frozenset(r[0].lower() for r in con.execute("SELECT username FROM users"))
+        finally:
+            con.close()
+    except Exception:
+        pass
+    _MENTION_CACHE.update(at=now, names=names)
+    return names
+
+
+def _clear_mention_cache():
+    _MENTION_CACHE.update(at=0.0, names=frozenset())
 VIDEO_EXTS = (".mp4", ".mov", ".webm", ".m4v")
 MAX_VIDEO_BYTES = 50 * 1024 * 1024
 
@@ -101,16 +134,34 @@ def extract_hashtags(body: str):
 
 
 def linkify_tags(body: str):
-    """Escape HTML, then linkify #hashtags. Returns Markup (safe)."""
+    """Escape HTML, then linkify #hashtags and @mentions. Returns Markup (safe).
+
+    @mentions link to /u/<username> only when that username actually exists;
+    anything else (emails, random @words) is left as plain text.
+    """
     from markupsafe import escape, Markup
+    known = _mention_usernames()
     parts, last = [], 0
-    for m in HASHTAG_RE.finditer(body or ""):
-        parts.append(escape(body[last:m.start()]))
-        tag = m.group(1)
-        parts.append(
-            f'<a class="htag" href="/tag/{tag.lower()}">#{escape(tag)}</a>')
+    text = body or ""
+    for m in _TOKEN_RE.finditer(text):
+        start = m.start()
+        if m.group(2) is not None:  # @mention candidate
+            # skip when glued to a word char (e.g. the user part of an email)
+            if start > 0 and (text[start - 1].isalnum() or text[start - 1] == "_"):
+                continue
+            uname = m.group(2)
+            if uname.lower() not in known:
+                continue
+            parts.append(escape(text[last:start]))
+            parts.append(
+                f'<a class="mention" href="/u/{escape(uname)}">@{escape(uname)}</a>')
+        else:  # #hashtag
+            tag = m.group(1)
+            parts.append(escape(text[last:start]))
+            parts.append(
+                f'<a class="htag" href="/tag/{tag.lower()}">#{escape(tag)}</a>')
         last = m.end()
-    parts.append(escape(body[last:]))
+    parts.append(escape(text[last:]))
     return Markup("".join(parts))
 
 
@@ -918,6 +969,40 @@ async def gif_search(request: Request, q: str = "", user=Depends(current_user)):
                     "preview": (fmts.get("tinygif") or {}).get("url") or url})
     return {"results": out}
 
+
+
+# ---- @mention autocomplete: user search ----
+def _like_escape(q: str) -> str:
+    return q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+@app.get("/api/users/search")
+async def users_search(request: Request, q: str = "", user=Depends(current_user),
+                       db=Depends(get_db)):
+    """Login-gated prefix search over usernames/display names for @mention
+    autocomplete. Returns at most 8 matches with public fields only."""
+    if user is None:
+        return JSONResponse({"error": "login required"}, status_code=401)
+    query = q.strip()[:32]
+    if not query:
+        return {"results": []}
+    like = _like_escape(query) + "%"
+    cur = await db.execute(
+        """SELECT id, username, display_name, avatar_approved FROM users
+           WHERE username LIKE ? ESCAPE '\\' OR display_name LIKE ? ESCAPE '\\'
+           ORDER BY CASE WHEN username LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END,
+                    username COLLATE NOCASE
+           LIMIT 8""",
+        (like, like, like))
+    out = []
+    for r in await cur.fetchall():
+        out.append({
+            "id": r["id"],
+            "username": r["username"],
+            "display_name": r["display_name"],
+            "avatar_url": f"/media/avatars/{r['username']}.jpg" if r["avatar_approved"] else None,
+        })
+    return {"results": out}
 
 
 # ---- Find a Dispo (Google Places) ----
