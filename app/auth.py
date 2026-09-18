@@ -67,3 +67,38 @@ def read_age_token(token: str) -> bool:
     except BadSignature:
         return False
     return data.get("age_ok") is True
+
+
+# Staged Twitch OAuth profiles awaiting Terms acceptance. A new OAuth user
+# is not created until they accept the Terms; their Twitch profile rides in
+# this signed token (separate salt so it can never double as a session or
+# age pass). Short-lived-ish: 30-minute expiry.
+_pending_serializer = URLSafeSerializer(SESSION_SECRET, salt="thc-terms-pending")
+_PENDING_TTL_SECONDS = 30 * 60
+
+
+def make_pending_oauth_token(profile: dict) -> str:
+    """Sign a staged OAuth profile dict for the /terms interstitial."""
+    return _pending_serializer.dumps({
+        "profile": profile,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+def read_pending_oauth_token(token: str):
+    """Return the staged profile dict, or None if invalid/expired."""
+    if not token:
+        return None
+    try:
+        data = _pending_serializer.loads(token)
+    except BadSignature:
+        return None
+    try:
+        ts = datetime.fromisoformat(data.get("ts", ""))
+    except (ValueError, TypeError):
+        return None
+    age = (datetime.now(timezone.utc) - ts).total_seconds()
+    if age < 0 or age > _PENDING_TTL_SECONDS:
+        return None
+    profile = data.get("profile")
+    return profile if isinstance(profile, dict) else None

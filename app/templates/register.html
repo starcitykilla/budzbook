@@ -9,6 +9,8 @@
     <label>Display name <input name="display_name" maxlength="60" placeholder="How your name shows up"></label>
     <label>Twitch username <input name="twitch_username" maxlength="40" placeholder="links you to stream overlays"></label>
     <label>Password <input type="password" name="password" required minlength="6"></label>
+    <label class="terms-check"><input type="checkbox" name="agree_terms" value="yes" required>
+      I have read and agree to the <a href="/terms" target="_blank" rel="noopener">BudzBook Terms of Service</a>.</label>
     <button class="btn big" type="submit">Create account</button>
   </form>
   {% if twitch_configured %}

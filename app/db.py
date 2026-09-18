@@ -179,6 +179,15 @@ async def _migrate(db) -> None:
     if "avatar_builder_config" not in cols:
         await db.execute(
             "ALTER TABLE users ADD COLUMN avatar_builder_config TEXT NOT NULL DEFAULT ''")
+    # Terms of Service acceptance (clickwrap): UTC ISO timestamp of
+    # acceptance + the TERMS_VERSION that was accepted. NULL means the
+    # user has not accepted and is gated to /terms by middleware.
+    if "terms_accepted_at" not in cols:
+        await db.execute(
+            "ALTER TABLE users ADD COLUMN terms_accepted_at TEXT")
+    if "terms_version" not in cols:
+        await db.execute(
+            "ALTER TABLE users ADD COLUMN terms_version TEXT")
     # Avatar gear shop: hats/jerseys buyable with Budz (chat + site).
     cur = await db.execute("PRAGMA table_info(shop_items)")
     scols = [r[1] for r in await cur.fetchall()]

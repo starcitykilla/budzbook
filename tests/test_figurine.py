@@ -132,7 +132,8 @@ def test_profile_figurine_branch():
     c = _client()
     r = c.post("/register", data={
         "username": "figuser", "display_name": "Fig User",
-        "password": "secret123", "twitch_username": "figuser"},
+        "password": "secret123", "twitch_username": "figuser",
+        "agree_terms": "yes"},
         follow_redirects=False)
     assert r.status_code in (200, 303)
 

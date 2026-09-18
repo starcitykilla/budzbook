@@ -4,7 +4,7 @@ Run:  pip install -r requirements.txt
        uvicorn app.main:app        (from the project root)
 
 Route map (kept in one file on purpose so it's easy to read top to bottom):
-  Public:      /  /register  /login  /logout  /age-check
+  Public:      /  /register  /login  /logout  /age-check  /terms
                /manifest.webmanifest  (PWA install manifest)
                /api/stream/avatars  /api/stream/avatar/<username>   (stream-PC sync)
   Social:      /feed  /post  /post/<id>/like  /post/<id>/comment
@@ -25,6 +25,7 @@ import os
 import re
 import secrets
 import time
+import urllib.parse
 import uuid
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone, timedelta
@@ -33,6 +34,7 @@ from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+import aiosqlite
 import httpx
 import io
 from PIL import Image
@@ -41,10 +43,11 @@ from . import thc_adapter
 from . import currency
 from . import ticker
 from .auth import (AGE_COOKIE, SESSION_COOKIE, hash_password, make_age_token,
-                   make_session_token, read_age_token, read_session_token,
-                   verify_password)
-from .db import (AVATAR_DIR, BANNER_DIR, FIGURINE_DIR, MEDIA_DIR, POST_IMG_DIR, avatar_exists,
-                 avatar_path_for, figurine_exists, get_db, init_db)
+                   make_pending_oauth_token, make_session_token,
+                   read_age_token, read_pending_oauth_token,
+                   read_session_token, verify_password)
+from .db import (AVATAR_DIR, BANNER_DIR, DB_PATH, FIGURINE_DIR, MEDIA_DIR, POST_IMG_DIR,
+                 avatar_exists, avatar_path_for, figurine_exists, get_db, init_db)
 from . import twitch_oauth
 from .twitch_oauth import (authorize_url, configured as twitch_configured,
                            exchange_code, fetch_twitch_user, make_state,
@@ -54,6 +57,10 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,20}$")
 POST_MAX_LEN = 1000
 FEED_PAGE_SIZE = 10
+
+# Terms of Service clickwrap version. Bumping this forces every user
+# through /terms again (middleware compares users.terms_version).
+TERMS_VERSION = "2026-09-17"
 
 # Twitch channel embedded on the /watch page.
 TWITCH_CHANNEL = "krzy_budz"
@@ -137,6 +144,58 @@ templates.env.filters["fdt"] = _fmt_dt
 # --------------------------------------------------------------------------
 # 21+ age gate — BudzBook is a cannabis community.
 # Everything except the gate page itself, static/media assets, and the
+# --------------------------------------------------------------------------
+# Terms of Service clickwrap enforcement.
+# No authenticated user may use the site without accepting the current
+# TERMS_VERSION. Unaccepted users are bounced to /terms (with ?next= so
+# they land back where they were going after accepting).
+# Registered before the age gate so the age check runs first.
+# --------------------------------------------------------------------------
+def _terms_exempt(path: str) -> bool:
+    return (
+        path in ("/terms", "/terms/accept", "/age-check", "/login",
+                 "/logout", "/register", "/manifest.webmanifest")
+        or path.startswith(("/static/", "/media/", "/api/", "/auth/"))
+    )
+
+
+def _terms_accepted(row) -> bool:
+    """True when the user row shows acceptance of the current terms."""
+    try:
+        accepted_at = row["terms_accepted_at"]
+        version = row["terms_version"]
+    except (KeyError, TypeError, IndexError):
+        return False
+    return bool(accepted_at) and version == TERMS_VERSION
+
+
+def _safe_next(value: str) -> str:
+    """Allow only internal redirect targets (blocks open redirects)."""
+    if value and value.startswith("/") and not value.startswith("//"):
+        return value
+    return ""
+
+
+@app.middleware("http")
+async def terms_gate(request: Request, call_next):
+    if not _terms_exempt(request.url.path):
+        uid = read_session_token(request.cookies.get(SESSION_COOKIE, ""))
+        if isinstance(uid, int):
+            async with aiosqlite.connect(DB_PATH) as db:
+                db.row_factory = aiosqlite.Row
+                cur = await db.execute(
+                    "SELECT terms_accepted_at, terms_version FROM users WHERE id = ?",
+                    (uid,))
+                row = await cur.fetchone()
+            if row is None or not _terms_accepted(row):
+                nxt = request.url.path
+                if request.url.query:
+                    nxt += "?" + request.url.query
+                dest = "/terms?next=" + urllib.parse.quote(nxt, safe="")
+                return RedirectResponse(dest, status_code=303)
+    return await call_next(request)
+
+
 # stream-PC sync API requires a signed age cookie.
 # --------------------------------------------------------------------------
 def _age_exempt(path: str) -> bool:
@@ -312,6 +371,100 @@ async def index(request: Request, user=Depends(current_user), msg: str = ""):
     return templates.TemplateResponse(request, "index.html", { "user": user, "msg": msg})
 
 
+# --------------------------------------------------------------------------
+# Terms of Service (clickwrap). /terms is public — everyone must be able to
+# read the Terms before joining. /terms/accept records acceptance for
+# logged-in users, or finishes creating a staged Twitch OAuth account.
+# --------------------------------------------------------------------------
+@app.get("/terms")
+async def terms_page(request: Request, user=Depends(current_user),
+                     pending: str = "", next: str = "", msg: str = ""):
+    pending_profile = read_pending_oauth_token(pending) if pending else None
+    show_accept = bool(pending_profile) or (user is not None and not _terms_accepted(user))
+    return templates.TemplateResponse(request, "terms.html", {
+        "user": user,
+        "msg": msg,
+        "show_accept": show_accept,
+        "pending": pending if pending_profile else "",
+        "pending_name": (pending_profile or {}).get("display") or "",
+        "next": _safe_next(next),
+        "error": "",
+    })
+
+
+@app.post("/terms/accept")
+async def terms_accept(request: Request, db=Depends(get_db),
+                       user=Depends(current_user),
+                       agree: str = Form(""), pending: str = Form(""),
+                       next: str = Form("")):
+    nxt = _safe_next(next) or "/feed"
+    if agree != "yes":
+        # Server-side enforcement: the checkbox is mandatory.
+        pending_profile = read_pending_oauth_token(pending) if pending else None
+        return templates.TemplateResponse(request, "terms.html", {
+            "user": user,
+            "msg": "",
+            "show_accept": True,
+            "pending": pending if pending_profile else "",
+            "pending_name": (pending_profile or {}).get("display") or "",
+            "next": nxt if nxt != "/feed" else "",
+            "error": "You must check the box to accept the Terms of Service.",
+        }, status_code=400)
+    pending_profile = read_pending_oauth_token(pending) if pending else None
+    if pending_profile:
+        # Staged Twitch OAuth signup: create the account now that the
+        # Terms are accepted. Re-check username uniqueness at accept time.
+        login = pending_profile["login"]
+        username = login
+        n = 0
+        while True:
+            cur = await db.execute("SELECT id FROM users WHERE username = ?",
+                                   (username,))
+            if not await cur.fetchone():
+                break
+            n += 1
+            username = f"{login}_{n}"
+        # Same race guard as the old callback path: Twitch ID taken meanwhile?
+        cur = await db.execute("SELECT id FROM users WHERE twitch_id = ?",
+                               (pending_profile["twitch_id"],))
+        if await cur.fetchone():
+            return RedirectResponse("/login?msg=That+Twitch+account+is+already+linked",
+                                    status_code=303)
+        now = _now()
+        await db.execute(
+            "INSERT INTO users (username, display_name, password_hash, bio, " +
+            "twitch_username, twitch_id, twitch_avatar, twitch_verified, " +
+            "terms_accepted_at, terms_version, created_at)" +
+            " VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+            (username, pending_profile["display"],
+             hash_password("twitch-oauth:" + secrets.token_hex(16)),
+             pending_profile["bio"], login, pending_profile["twitch_id"],
+             pending_profile["avatar"], now, TERMS_VERSION, now))
+        await db.commit()
+        cur = await db.execute("SELECT * FROM users WHERE twitch_id = ?",
+                               (pending_profile["twitch_id"],))
+        new_user = await cur.fetchone()
+        if pending_profile["avatar"]:
+            if await mirror_twitch_avatar(username, pending_profile["avatar"]):
+                await db.execute("UPDATE users SET avatar_approved = 1 WHERE id = ?",
+                                 (new_user["id"],))
+                await db.commit()
+        await currency.grant_welcome_bonus(db, new_user["id"])
+        resp = RedirectResponse(
+            nxt + "?msg=Welcome+to+BudzBook!+100+Budz+on+the+house." if nxt == "/feed"
+            else nxt, status_code=303)
+        resp.set_cookie(SESSION_COOKIE, make_session_token(new_user["id"]),
+                        httponly=True, samesite="lax")
+        return resp
+    if user is None:
+        return RedirectResponse("/login?msg=Please+log+in+first", status_code=303)
+    await db.execute(
+        "UPDATE users SET terms_accepted_at = ?, terms_version = ? WHERE id = ?",
+        (_now(), TERMS_VERSION, user["id"]))
+    await db.commit()
+    return RedirectResponse(nxt, status_code=303)
+
+
 @app.get("/register")
 async def register_form(request: Request, user=Depends(current_user), msg: str = ""):
     if user:
@@ -323,13 +476,15 @@ async def register_form(request: Request, user=Depends(current_user), msg: str =
 @app.post("/register")
 async def register(request: Request, db=Depends(get_db),
                    username: str = Form(...), display_name: str = Form(""),
-                   password: str = Form(...), twitch_username: str = Form("")):
+                   password: str = Form(...), twitch_username: str = Form(""), agree_terms: str = Form("")):
     username = username.strip()
     msg = None
     if not USERNAME_RE.match(username):
         msg = "Username must be 3-20 chars: letters, numbers, underscores."
     elif len(password) < 6:
         msg = "Password must be at least 6 characters."
+    elif agree_terms != "yes":
+        msg = "You must agree to the Terms of Service to join BudzBook."
     else:
         cur = await db.execute("SELECT id FROM users WHERE username = ?", (username,))
         if await cur.fetchone():
@@ -338,11 +493,13 @@ async def register(request: Request, db=Depends(get_db),
         return templates.TemplateResponse(request, "register.html", { "user": None, "msg": msg,
             "twitch_configured": twitch_configured()},
                                           status_code=400)
+    now = _now()
     await db.execute(
-        "INSERT INTO users (username, display_name, password_hash, twitch_username, created_at)"
-        " VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO users (username, display_name, password_hash, twitch_username, " +
+        "terms_accepted_at, terms_version, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
         (username, display_name.strip() or username, hash_password(password),
-         twitch_username.strip(), _now()))
+         twitch_username.strip(), now, TERMS_VERSION, now))
     await db.commit()
     cur = await db.execute("SELECT * FROM users WHERE username = ?", (username,))
     user = await cur.fetchone()
@@ -448,34 +605,21 @@ async def twitch_callback(request: Request, db=Depends(get_db),
     cur = await db.execute("SELECT * FROM users WHERE twitch_id = ?",
                            (twitch_id,))
     user = await cur.fetchone()
-    is_new = False
     if not user:
-        is_new = True
-        username = login
-        n = 0
-        while True:
-            cur = await db.execute("SELECT id FROM users WHERE username = ?",
-                                   (username,))
-            if not await cur.fetchone():
-                break
-            n += 1
-            username = f"{login}_{n}"
-        # OAuth accounts get an unusable random password; they log in via Twitch.
-        await db.execute(
-            "INSERT INTO users (username, display_name, password_hash, bio, "
-            "twitch_username, twitch_id, twitch_avatar, twitch_verified, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)",
-            (username, display, hash_password("twitch-oauth:" + secrets.token_hex(16)),
-             tw_bio[:500], login, twitch_id, avatar, _now()))
-        await db.commit()
-        cur = await db.execute("SELECT * FROM users WHERE twitch_id = ?",
-                               (twitch_id,))
-        user = await cur.fetchone()
-        if avatar and await mirror_twitch_avatar(username, avatar):
-            await db.execute("UPDATE users SET avatar_approved = 1 WHERE id = ?",
-                             (user["id"],))
-            await db.commit()
-        await currency.grant_welcome_bonus(db, user["id"])
+        # NEW Twitch user: do NOT create the account yet. Stage the OAuth
+        # profile in a signed token and send them to /terms — the account
+        # is created by POST /terms/accept only after they agree ("no
+        # non-agree joins").
+        pending = make_pending_oauth_token({
+            "twitch_id": twitch_id,
+            "login": login,
+            "display": display,
+            "avatar": avatar,
+            "bio": tw_bio[:500],
+        })
+        return RedirectResponse(
+            "/terms?pending=" + urllib.parse.quote(pending, safe=""),
+            status_code=303)
     else:
         await db.execute(
             "UPDATE users SET twitch_username = ?, twitch_avatar = ?, "
@@ -489,11 +633,7 @@ async def twitch_callback(request: Request, db=Depends(get_db),
                 await db.execute("UPDATE users SET avatar_approved = 1 WHERE id = ?",
                                  (user["id"],))
         await db.commit()
-    if is_new:
-        resp = RedirectResponse("/feed?msg=Welcome+to+BudzBook!+100+Budz+on+the+house.",
-                                status_code=303)
-    else:
-        resp = RedirectResponse("/feed", status_code=303)
+    resp = RedirectResponse("/feed", status_code=303)
     resp.set_cookie(SESSION_COOKIE, make_session_token(user["id"]),
                     httponly=True, samesite="lax")
     return resp
