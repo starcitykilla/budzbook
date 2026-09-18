@@ -25,7 +25,8 @@ anon.cookies.set(AGE_COOKIE, make_age_token())
 
 def _register(username, password="pw123456"):
     r = client.post("/register", data={"username": username, "password": password,
-                                       "display_name": username},
+                                       "display_name": username,
+        "agree_terms": "yes"},
                     follow_redirects=False)
     assert r.status_code in (200, 303), (username, r.status_code)
 

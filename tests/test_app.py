@@ -56,7 +56,8 @@ def _png_bytes(color=(60, 120, 60)):
 def _register(username, password="secret123"):
     return client.post("/register", data={
         "username": username, "display_name": username.title(),
-        "password": password, "twitch_username": username},
+        "password": password, "twitch_username": username,
+        "agree_terms": "yes"},
         follow_redirects=False)
 
 
@@ -68,8 +69,10 @@ def _login(username, password="secret123"):
 async def _make_admin():
     db = await aiosqlite.connect(DB_PATH)
     await db.execute(
-        "INSERT INTO users (username, display_name, password_hash, is_admin, created_at)"
-        " VALUES ('mod', 'Mod', ?, 1, 'now')", (hash_password("modpass"),))
+        "INSERT INTO users (username, display_name, password_hash, is_admin,"
+        " terms_accepted_at, terms_version, created_at)"
+        " VALUES ('mod', 'Mod', ?, 1, '2026-09-17T00:00:00+00:00', '2026-09-17', 'now')",
+        (hash_password("modpass"),))
     await db.commit()
     await db.close()
 
@@ -101,7 +104,8 @@ def test_register_and_login_logout():
 
 def test_register_bad_username_and_duplicate():
     r = client.post("/register", data={"username": "ab", "display_name": "x",
-                                       "password": "secret123", "twitch_username": ""})
+                                       "password": "secret123", "twitch_username": "",
+        "agree_terms": "yes"})
     assert r.status_code == 400  # too short
     r = client.post("/login", data={"username": "alice", "password": "wrongpass"})
     assert r.status_code == 400  # bad password

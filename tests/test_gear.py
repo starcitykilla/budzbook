@@ -47,7 +47,8 @@ def _client():
 def _register(c, username, password="secret123"):
     return c.post("/register", data={
         "username": username, "display_name": username.title(),
-        "password": password, "twitch_username": username},
+        "password": password, "twitch_username": username,
+        "agree_terms": "yes"},
         follow_redirects=False)
 
 
