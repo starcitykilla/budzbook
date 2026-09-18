@@ -17,11 +17,14 @@ DB_PATH = os.environ.get("THC_SOCIAL_DB", os.path.join(BASE_DIR, "thc_social.db"
 
 # User-uploaded media. Avatars live at media/avatars/<username>.jpg
 # (square-cropped, max 512px). Post images live under media/posts/.
+# Comment attachments live under media/comments/.
 MEDIA_DIR = os.environ.get("THC_SOCIAL_MEDIA", os.path.join(BASE_DIR, "media"))
 AVATAR_DIR = os.path.join(MEDIA_DIR, "avatars")
 FIGURINE_DIR = os.path.join(MEDIA_DIR, "figurines")
 POST_IMG_DIR = os.path.join(MEDIA_DIR, "posts")
+COMMENT_IMG_DIR = os.path.join(MEDIA_DIR, "comments")
 BANNER_DIR = os.path.join(MEDIA_DIR, "banners")
+os.makedirs(COMMENT_IMG_DIR, exist_ok=True)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -251,6 +254,8 @@ async def _migrate_social(db) -> None:
     for table, coldef in (("posts", "group_id INTEGER"),
                           ("posts", "video_path TEXT"),
                           ("comments", "gif_url TEXT NOT NULL DEFAULT ''"),
+                          ("comments", "image_path TEXT"),
+                          ("comments", "video_path TEXT"),
                           ("users", "theme_color TEXT NOT NULL DEFAULT ''"),
                           ("users", "banner_path TEXT NOT NULL DEFAULT ''"),
                           ("users", "feed_prefs TEXT NOT NULL DEFAULT ''")):

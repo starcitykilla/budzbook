@@ -43,14 +43,23 @@
   <div class="comments">
     {% for c in post.comments %}
       <div class="comment"><b>{{ c.display_name }}</b> <span class="uname">@{{ c.username }}</span>
-        {{ c.body }}{% if c.gif_url %}<img class="comment-gif" src="{{ c.gif_url }}" alt="GIF" loading="lazy">{% endif %}</div>
+        {{ c.body }}{% if c.gif_url %}<img class="comment-gif" src="{{ c.gif_url }}" alt="GIF" loading="lazy">{% endif %}
+        {% if c.image_path %}<img class="comment-img" src="/media/{{ c.image_path }}" alt="comment image" loading="lazy">{% endif %}
+        {% if c.video_path %}<video class="comment-video" src="/media/{{ c.video_path }}" controls playsinline preload="metadata"></video>{% endif %}</div>
     {% endfor %}
-    <form class="comment-form" method="post" action="/post/{{ post.id }}/comment">
+    <form class="comment-form" method="post" action="/post/{{ post.id }}/comment" enctype="multipart/form-data">
       <input name="body" maxlength="500" placeholder="Write a comment…">
       <input type="hidden" name="gif_url" id="cgif-{{ post.id }}" value="">
+      <input type="file" name="image" id="cimg-{{ post.id }}" accept="image/*" hidden>
+      <input type="file" name="video" id="cvid-{{ post.id }}" accept="video/*" hidden>
+      <button type="button" class="btn sm ghost" title="Attach a photo"
+              onclick="document.getElementById('cimg-{{ post.id }}').click()">📷</button>
+      <button type="button" class="btn sm ghost" title="Attach a video"
+              onclick="document.getElementById('cvid-{{ post.id }}').click()">🎬</button>
       <button type="button" class="btn sm ghost gif-picker-btn" data-post="{{ post.id }}" title="Add a GIF">GIF</button>
       <button class="btn sm" type="submit">Reply</button>
     </form>
+    <div class="attach-name" id="cattach-{{ post.id }}"></div>
     <div class="gif-preview" id="cgifprev-{{ post.id }}" hidden></div>
     <div class="gif-modal" id="gifmodal-{{ post.id }}" hidden>
       <div class="gif-modal-card">
@@ -108,6 +117,14 @@ function budzGifUnpick(pid) {
 if (!window.__budzGifInit) {
   window.__budzGifInit = true;
   document.addEventListener('DOMContentLoaded', () => budzGifReady());
+  /* show chosen comment-attachment filename under the form */
+  document.addEventListener('change', (e) => {
+    const t = e.target.closest('input[type="file"][id^="cimg-"], input[type="file"][id^="cvid-"]');
+    if (!t) return;
+    const pid = t.id.split('-')[1];
+    const label = document.getElementById('cattach-' + pid);
+    if (label) label.textContent = t.files.length ? '📎 ' + t.files[0].name : '';
+  });
   document.addEventListener('click', async (e) => {
     const t = e.target.closest('.gif-picker-btn,.gif-search-btn,.gif-close-btn,.gif-thumb');
     if (!t) return;

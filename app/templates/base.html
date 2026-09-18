@@ -152,6 +152,22 @@ if ("serviceWorker" in navigator) {
   setInterval(load, 90000);
 })();
 </script>
+<script>
+// Double-submit guard: a double-tapped Post/Comment/Send/Like button must
+// not fire the form twice. The server has its own guard too; this is the
+// first line of defense so the button goes quiet the instant it's tapped.
+document.addEventListener("submit", function (e) {
+  var f = e.target;
+  if (!(f instanceof HTMLFormElement)) return;
+  if (e.defaultPrevented) return; // e.g. the delete confirm was cancelled
+  if (f.dataset.submitted) { e.preventDefault(); return; }
+  f.dataset.submitted = "1";
+  f.querySelectorAll('button[type="submit"], input[type="submit"]').forEach(function (b) {
+    b.disabled = true;
+    b.classList.add("is-submitting");
+  });
+});
+</script>
 
 </body>
 </html>

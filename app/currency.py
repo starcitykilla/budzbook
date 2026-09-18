@@ -8,7 +8,7 @@ value and cannot be cashed out — arcade tokens, not money.
 Exchange uses fixed rates vs the base currency (Budz) with a small house
 fee. Amounts are integers; the swap floors in the house's favor.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 EXCHANGE_FEE = 0.02          # 2% house fee on swaps, burned
 DAILY_CLAIM_AMOUNT = 50      # faucet payout in base currency per day
@@ -128,22 +128,32 @@ async def claim_daily(db, user_id):
     base = await get_base_currency(db)
     if not base:
         return False, "No base currency yet."
+    # Atomic claim: one statement inserts a fresh row or refreshes an expired
+    # one. rowcount == 1 means THIS call won the claim; 0 means the faucet was
+    # already claimed within the last 24h -- possibly by a double-tapped twin
+    # of this very request -- so we award nothing.
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    now = _now()
     cur = await db.execute(
-        "SELECT claimed_at FROM claims WHERE user_id = ? AND currency_id = ?",
-        (user_id, base["id"]))
-    row = await cur.fetchone()
-    if row:
-        last = datetime.fromisoformat(row["claimed_at"])
-        elapsed = (datetime.now(timezone.utc) - last).total_seconds()
-        if elapsed < 24 * 3600:
-            hrs = int((24 * 3600 - elapsed) // 3600) + 1
-            return False, f"Faucet's dry — come back in ~{hrs}h."
-    await award(db, user_id, base["code"], DAILY_CLAIM_AMOUNT, "daily faucet claim")
-    await db.execute(
         """INSERT INTO claims (user_id, currency_id, claimed_at) VALUES (?, ?, ?)
-           ON CONFLICT(user_id, currency_id) DO UPDATE SET claimed_at = ?""",
-        (user_id, base["id"], _now(), _now()))
-    await db.commit()
+           ON CONFLICT(user_id, currency_id) DO UPDATE
+           SET claimed_at = excluded.claimed_at
+           WHERE claims.claimed_at <= ?""",
+        (user_id, base["id"], now, cutoff))
+    if cur.rowcount == 0:
+        cur = await db.execute(
+            "SELECT claimed_at FROM claims WHERE user_id = ? AND currency_id = ?",
+            (user_id, base["id"]))
+        last = datetime.fromisoformat((await cur.fetchone())["claimed_at"])
+        elapsed = (datetime.now(timezone.utc) - last).total_seconds()
+        hrs = max(int((24 * 3600 - elapsed) // 3600) + 1, 1)
+        await db.rollback()
+        return False, f"Faucet's dry — come back in ~{hrs}h."
+    try:
+        await award(db, user_id, base["code"], DAILY_CLAIM_AMOUNT, "daily faucet claim")
+    except Exception:
+        await db.rollback()
+        raise
     return True, f"Claimed {DAILY_CLAIM_AMOUNT} {base['icon']}{base['code']} — see you tomorrow."
 
 

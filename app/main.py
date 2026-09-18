@@ -24,6 +24,7 @@ import math
 import os
 import re
 import secrets
+import sqlite3
 import time
 import urllib.parse
 import uuid
@@ -37,7 +38,7 @@ from fastapi.templating import Jinja2Templates
 import aiosqlite
 import httpx
 import io
-from PIL import Image
+from PIL import Image, ImageOps
 
 from . import thc_adapter
 from . import currency
@@ -46,8 +47,9 @@ from .auth import (AGE_COOKIE, SESSION_COOKIE, hash_password, make_age_token,
                    make_pending_oauth_token, make_session_token,
                    read_age_token, read_pending_oauth_token,
                    read_session_token, verify_password)
-from .db import (AVATAR_DIR, BANNER_DIR, DB_PATH, FIGURINE_DIR, MEDIA_DIR, POST_IMG_DIR,
-                 avatar_exists, avatar_path_for, figurine_exists, get_db, init_db)
+from .db import (AVATAR_DIR, BANNER_DIR, COMMENT_IMG_DIR, DB_PATH, FIGURINE_DIR,
+                 MEDIA_DIR, POST_IMG_DIR, avatar_exists, avatar_path_for,
+                 figurine_exists, get_db, init_db)
 from . import twitch_oauth
 from .twitch_oauth import (authorize_url, configured as twitch_configured,
                            exchange_code, fetch_twitch_user, make_state,
@@ -283,6 +285,26 @@ def _now():
 
 
 # --------------------------------------------------------------------------
+# Double-submit protection: a double-tapped Post/Comment/Send button must
+# not create two rows. An identical write from the same user inside
+# DEDUP_WINDOW_S is treated as a retry of the first one and skipped.
+# --------------------------------------------------------------------------
+DEDUP_WINDOW_S = 30
+
+
+def _dedup_cutoff() -> str:
+    return (datetime.now(timezone.utc) - timedelta(seconds=DEDUP_WINDOW_S)).isoformat()
+
+
+async def _recent_duplicate(db, table: str, where: str, args: tuple) -> bool:
+    """True when the same user already made this exact write recently."""
+    cur = await db.execute(
+        f"SELECT 1 FROM {table} WHERE {where} AND created_at >= ? LIMIT 1",
+        (*args, _dedup_cutoff()))
+    return bool(await cur.fetchone())
+
+
+# --------------------------------------------------------------------------
 # Avatars (upload -> mod approval -> stream sync)
 # --------------------------------------------------------------------------
 def process_avatar_upload(upload: UploadFile, username: str) -> None:
@@ -489,18 +511,24 @@ async def register(request: Request, db=Depends(get_db),
         cur = await db.execute("SELECT id FROM users WHERE username = ?", (username,))
         if await cur.fetchone():
             msg = "That username is taken."
+    if not msg:
+        try:
+            now = _now()
+            await db.execute(
+                "INSERT INTO users (username, display_name, password_hash, twitch_username, "
+                "terms_accepted_at, terms_version, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (username, display_name.strip() or username, hash_password(password),
+                 twitch_username.strip(), now, TERMS_VERSION, now))
+            await db.commit()
+        except sqlite3.IntegrityError:
+            # Raced double-submit: the first tap already took this username.
+            await db.rollback()
+            msg = "That username is taken."
     if msg:
         return templates.TemplateResponse(request, "register.html", { "user": None, "msg": msg,
             "twitch_configured": twitch_configured()},
                                           status_code=400)
-    now = _now()
-    await db.execute(
-        "INSERT INTO users (username, display_name, password_hash, twitch_username, " +
-        "terms_accepted_at, terms_version, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (username, display_name.strip() or username, hash_password(password),
-         twitch_username.strip(), now, TERMS_VERSION, now))
-    await db.commit()
     cur = await db.execute("SELECT * FROM users WHERE username = ?", (username,))
     user = await cur.fetchone()
     await currency.grant_welcome_bonus(db, user["id"])
@@ -791,6 +819,13 @@ async def create_post(request: Request, db=Depends(get_db), user=Depends(current
         return RedirectResponse("/feed?msg=Posts+are+1000+chars+max", status_code=303)
     if kind not in ("post", "grow"):
         kind = "post"
+    if await _recent_duplicate(
+            db, "posts",
+            "user_id = ? AND body = ? AND kind = ?"
+            " AND COALESCE(group_id, -1) = COALESCE(?, -1)",
+            (user["id"], body, kind, group_id)):
+        # Double-tap: the first tap already posted this. Don't make a twin.
+        return RedirectResponse("/feed?msg=Posted", status_code=303)
     image_path = None
     if image and image.filename:
         ext = os.path.splitext(image.filename)[1].lower()
@@ -854,17 +889,85 @@ async def toggle_like(request: Request, post_id: int, db=Depends(get_db),
         await db.execute("DELETE FROM likes WHERE user_id = ? AND post_id = ?",
                          (user["id"], post_id))
     else:
-        await db.execute("INSERT INTO likes (user_id, post_id, created_at) VALUES (?, ?, ?)",
-                         (user["id"], post_id, _now()))
+        try:
+            await db.execute("INSERT INTO likes (user_id, post_id, created_at) VALUES (?, ?, ?)",
+                             (user["id"], post_id, _now()))
+        except sqlite3.IntegrityError:
+            pass  # raced double-tap: the like already landed
     await db.commit()
     back = request.headers.get("referer", "/feed")
     return RedirectResponse(back, status_code=303)
 
 
+# --------------------------------------------------------------------------
+# Comment image uploads: phone photos arrive huge (4000px+), so downscale
+# server-side before storing. Animated GIFs pass through untouched.
+# --------------------------------------------------------------------------
+COMMENT_IMG_MAX_DIM = 1600  # longest side, px -- never upscale
+COMMENT_IMG_QUALITY = 82    # JPEG/WebP quality at full size
+# Fallback steps (max_dim, quality) tried in order when the processed file
+# still exceeds MAX_UPLOAD_BYTES; the first step that fits wins.
+_COMMENT_IMG_STEPS = ((1600, 82), (1280, 75), (1024, 68), (800, 60))
+
+
+def _resize_comment_image(data: bytes, ext: str) -> bytes | None:
+    """Normalize an uploaded comment image for storage.
+
+    Applies EXIF orientation, strips EXIF, and downscales so the longest
+    side is at most COMMENT_IMG_MAX_DIM (aspect preserved, Lanczos, never
+    upscaled). Animated GIFs are returned byte-identical. Returns the
+    smallest encode that fits under MAX_UPLOAD_BYTES, or the smallest
+    attempt (over the cap -- the caller rejects it), or None when the
+    bytes cannot be decoded as an image.
+    """
+    try:
+        im = Image.open(io.BytesIO(data))
+        animated = ext == ".gif" and getattr(im, "n_frames", 1) > 1
+    except Exception:
+        return None
+    if animated:
+        return data
+    try:
+        im = ImageOps.exif_transpose(im)
+    except Exception:
+        pass
+    w, h = im.size
+    has_exif = bool(im.info.get("exif"))
+    if max(w, h) <= COMMENT_IMG_MAX_DIM and not has_exif:
+        return data  # small and clean: store byte-identical
+    fmt = {"jpg": "JPEG", "jpeg": "JPEG", "png": "PNG", "gif": "GIF",
+           "webp": "WEBP"}[ext.lstrip(".")]
+    best = data
+    for max_dim, quality in _COMMENT_IMG_STEPS:
+        frame = im
+        if max(w, h) > max_dim:
+            scale = max_dim / max(w, h)
+            frame = im.resize((round(w * scale), round(h * scale)),
+                               Image.LANCZOS)
+        save_kw: dict = {"format": fmt, "optimize": True}
+        if fmt == "JPEG":
+            if frame.mode in ("RGBA", "LA", "P"):
+                frame = frame.convert("RGB")
+            save_kw.update(quality=quality, progressive=True)
+        elif fmt == "WEBP":
+            save_kw.update(quality=quality, method=6)
+        # PNG/GIF: lossless, optimize only -- quality steps do not apply.
+        buf = io.BytesIO()
+        try:
+            frame.save(buf, **save_kw)
+        except Exception:
+            return None
+        best = buf.getvalue()
+        if len(best) <= MAX_UPLOAD_BYTES:
+            return best
+    return best
+
+
 @app.post("/post/{post_id}/comment")
 async def add_comment(request: Request, post_id: int, db=Depends(get_db),
                       user=Depends(current_user), body: str = Form(...),
-                      gif_url: str = Form("")):
+                      gif_url: str = Form(""),
+                      image: UploadFile = File(None), video: UploadFile = File(None)):
     redir = login_required(user)
     if redir:
         return redir
@@ -872,11 +975,46 @@ async def add_comment(request: Request, post_id: int, db=Depends(get_db),
     gif_url = gif_url.strip()[:500]
     if gif_url and not gif_url.startswith(("http://", "https://")):
         gif_url = ""
-    if body or gif_url:
+    if (body or gif_url) and await _recent_duplicate(
+            db, "comments",
+            "post_id = ? AND user_id = ? AND body = ? AND gif_url = ?",
+            (post_id, user["id"], body, gif_url)):
+        # Double-tap: the first tap already commented this. Don't make a twin.
+        return RedirectResponse(request.headers.get("referer", "/feed"), status_code=303)
+    image_path = None
+    if image and image.filename:
+        ext = os.path.splitext(image.filename)[1].lower()
+        if ext not in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
+            return RedirectResponse("/feed?msg=Image+must+be+JPG/PNG/GIF/WebP", status_code=303)
+        data = await image.read()
+        if len(data) > MAX_VIDEO_BYTES:
+            return RedirectResponse("/feed?msg=Image+too+large+(5MB+max)", status_code=303)
+        data = _resize_comment_image(data, ext)
+        if data is None:
+            return RedirectResponse("/feed?msg=Image+not+readable", status_code=303)
+        if len(data) > MAX_UPLOAD_BYTES:
+            return RedirectResponse("/feed?msg=Image+too+large+(5MB+max)", status_code=303)
+        name = f"{uuid.uuid4().hex}{ext}"
+        with open(os.path.join(COMMENT_IMG_DIR, name), "wb") as f:
+            f.write(data)
+        image_path = f"comments/{name}"
+    video_path = None
+    if video and video.filename:
+        vext = os.path.splitext(video.filename)[1].lower()
+        if vext not in VIDEO_EXTS:
+            return RedirectResponse("/feed?msg=Video+must+be+MP4/MOV/WebM", status_code=303)
+        vdata = await video.read()
+        if len(vdata) > MAX_VIDEO_BYTES:
+            return RedirectResponse("/feed?msg=Video+too+large+(50MB+max)", status_code=303)
+        vname = f"{uuid.uuid4().hex}{vext}"
+        with open(os.path.join(COMMENT_IMG_DIR, vname), "wb") as f:
+            f.write(vdata)
+        video_path = f"comments/{vname}"
+    if body or gif_url or image_path or video_path:
         await db.execute(
-            "INSERT INTO comments (post_id, user_id, body, gif_url, created_at)"
-            " VALUES (?, ?, ?, ?, ?)",
-            (post_id, user["id"], body, gif_url, _now()))
+            "INSERT INTO comments (post_id, user_id, body, gif_url, image_path, video_path, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (post_id, user["id"], body, gif_url, image_path, video_path, _now()))
         await db.commit()
     back = request.headers.get("referer", "/feed")
     return RedirectResponse(back, status_code=303)
@@ -1077,9 +1215,16 @@ async def report_post(request: Request, post_id: int, db=Depends(get_db),
         return RedirectResponse("/feed?msg=Post+not+found", status_code=303)
     if row["user_id"] == user["id"]:
         return RedirectResponse("/feed?msg=You+can't+report+your+own+post", status_code=303)
+    reason = reason.strip()[:300]
+    if await _recent_duplicate(
+            db, "reports",
+            "post_id = ? AND reporter_id = ? AND reason = ?",
+            (post_id, user["id"], reason)):
+        # Double-tap: already reported. Don't stack a twin report.
+        return RedirectResponse("/feed?msg=Reported+-+mods+will+take+a+look", status_code=303)
     await db.execute(
         "INSERT INTO reports (post_id, reporter_id, reason, created_at) VALUES (?, ?, ?, ?)",
-        (post_id, user["id"], reason.strip()[:300], _now()))
+        (post_id, user["id"], reason, _now()))
     await db.commit()
     return RedirectResponse("/feed?msg=Reported+-+mods+will+take+a+look", status_code=303)
 
@@ -1361,6 +1506,12 @@ async def dm_send(username: str, request: Request, db=Depends(get_db),
     peer = await cur.fetchone()
     body = body.strip()[:1000]
     if peer and peer["id"] != user["id"] and body:
+        if await _recent_duplicate(
+                db, "messages",
+                "sender_id = ? AND recipient_id = ? AND body = ?",
+                (user["id"], peer["id"], body)):
+            # Double-tap: the first tap already sent this. Don't send a twin.
+            return RedirectResponse(f"/messages/{username}", status_code=303)
         await db.execute(
             "INSERT INTO messages (sender_id, recipient_id, body, created_at)"
             " VALUES (?, ?, ?, ?)", (user["id"], peer["id"], body, _now()))
@@ -1453,8 +1604,17 @@ async def exchange_do(request: Request, db=Depends(get_db), user=Depends(current
         amount_in = int(amount)
     except ValueError:
         return RedirectResponse("/exchange?msg=Amount+must+be+a+whole+number", status_code=303)
-    ok, msg, _out = await currency.swap(db, user["id"], from_code.strip(),
-                                        to_code.strip(), amount_in)
+    f_code, t_code = from_code.strip().upper(), to_code.strip().upper()
+    cur = await db.execute(
+        "SELECT 1 FROM currency_txns WHERE user_id = ? AND reason = ?"
+        " AND delta = ? AND created_at >= ? LIMIT 1",
+        (user["id"], f"swap {f_code}->{t_code} (2% fee)",
+         -amount_in, _dedup_cutoff()))
+    if await cur.fetchone():
+        # Double-tap: the first tap already swapped this. Don't swap twice.
+        return RedirectResponse("/exchange?msg=Swap+already+processed",
+                                status_code=303)
+    ok, msg, _out = await currency.swap(db, user["id"], f_code, t_code, amount_in)
     return RedirectResponse(f"/exchange?msg={msg}", status_code=303)
 
 
@@ -1543,12 +1703,23 @@ async def admin_currency_grant(request: Request, db=Depends(get_db),
                                 status_code=303)
     if not target:
         return RedirectResponse("/admin?msg=User+not+found", status_code=303)
-    try:
-        await currency.award(db, target["id"], code.strip(), amount,
-                             f"mod grant by {user['username']}")
-        msg = f"Granted+{amount}+{code.upper()}+to+{username.strip()}"
-    except ValueError as e:
-        msg = str(e)
+    code = code.strip().upper()
+    cur = await db.execute(
+        """SELECT 1 FROM currency_txns t JOIN currencies c ON c.id = t.currency_id
+           WHERE t.user_id = ? AND c.code = ? AND t.delta = ? AND t.reason = ?
+             AND t.created_at >= ? LIMIT 1""",
+        (target["id"], code, amount, f"mod grant by {user['username']}",
+         _dedup_cutoff()))
+    if await cur.fetchone():
+        # Double-tap: the first tap already granted this. Don't grant twice.
+        msg = "Grant+already+processed"
+    else:
+        try:
+            await currency.award(db, target["id"], code, amount,
+                                 f"mod grant by {user['username']}")
+            msg = f"Granted+{amount}+{code}+to+{username.strip()}"
+        except ValueError as e:
+            msg = str(e)
     return RedirectResponse(f"/admin?msg={msg}", status_code=303)
 
 
