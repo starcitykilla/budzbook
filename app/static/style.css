@@ -590,3 +590,30 @@ button[type="submit"]:disabled, input[type="submit"]:disabled {
   opacity: .55;
   cursor: wait;
 }
+
+/* Emoji reactions */
+.rsum { display: inline-flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.rchip { background: var(--card2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 999px; padding: 2px 8px; font-size: 13px; cursor: pointer; }
+.rchip.mine { border-color: var(--gold); background: rgba(255,215,0,.12); }
+.react-picker { display: flex; gap: 6px; margin: 6px 0; padding: 6px 8px;
+  background: rgba(0,0,0,.35); border: 1px solid var(--line); border-radius: 12px;
+  width: fit-content; }
+.react-picker[hidden] { display: none; }
+.rpick-emoji { font-size: 22px; background: none; border: 2px solid transparent;
+  border-radius: 10px; cursor: pointer; padding: 2px 6px; }
+.rpick-emoji.mine { border-color: var(--gold); background: rgba(255,215,0,.12); }
+.react-open { cursor: pointer; }
+.react-btn.on { border-color: var(--green); }
+.creact { display: flex; gap: 6px; align-items: center; margin-top: 4px; flex-wrap: wrap; }
+.creact .react-open { font-size: 13px; padding: 2px 9px; }
+
+
+/* budzHoldReact CSS: suppress iOS text callout/selection on hold zones;
+   hold zones; keep vertical scrolling working while holding. */
+.post-actions, .creact {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: pan-y;
+}

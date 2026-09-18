@@ -1,5 +1,8 @@
 {# Shared post card. Expects `post` dict with like_count, comment_count,
-   liked, comments, username, display_name, avatar_approved; and `user`. #}
+   liked, reaction_counts, my_reaction, comments (each with reaction_counts
+   and my_reaction), username, display_name, avatar_approved; and `user`.
+   REMOJI maps reaction keys to their display emoji. #}
+{% set REMOJI = {'like': '👍', 'love': '❤️', 'laugh': '😂', 'wow': '😮', 'sad': '😢', 'angry': '😡'} %}
 <article class="post" id="post-{{ post.id }}">
   <div class="post-head">
     {% if post.avatar_approved %}
@@ -23,11 +26,13 @@
     <video class="post-video" src="/media/{{ post.video_path }}" controls playsinline preload="metadata"></video>
   {% endif %}
   <div class="post-actions">
-    <form method="post" action="/post/{{ post.id }}/like">
-      <button class="pill {% if post.liked %}on{% endif %}" type="submit">
-        {% if post.liked %}💚{% else %}🤍{% endif %} {{ post.like_count }}
-      </button>
-    </form>
+    <button class="pill react-btn {% if post.liked %}on{% endif %}" type="button"
+            data-target="post" data-id="{{ post.id }}" data-emoji="like" title="Like">
+      {% if post.liked %}💚{% else %}🤍{% endif %} <span data-rc="like">{{ post.like_count }}</span>
+    </button>
+    <button class="pill react-open" type="button" data-target="post"
+            data-id="{{ post.id }}" title="Add a reaction">😊</button>
+    <span class="rsum" id="rsum-post-{{ post.id }}">{% for e, n in post.reaction_counts|dictsort %}{% if e != 'like' %}<button type="button" class="rchip{% if post.my_reaction == e %} mine{% endif %}" data-target="post" data-id="{{ post.id }}" data-emoji="{{ e }}" title="{{ e }}">{{ REMOJI[e] }} {{ n }}</button>{% endif %}{% endfor %}</span>
     <span class="pill ghost">💬 {{ post.comment_count }}</span>
     {% if post.user_id == user.id or user.is_admin %}
       <form method="post" action="/post/{{ post.id }}/delete"
@@ -40,12 +45,30 @@
       </form>
     {% endif %}
   </div>
+  <div class="react-picker" id="rpick-post-{{ post.id }}" hidden>
+    {% for e in ['love', 'laugh', 'wow', 'sad', 'angry'] %}
+    <button type="button" class="rpick-emoji{% if post.my_reaction == e %} mine{% endif %}"
+            data-target="post" data-id="{{ post.id }}" data-emoji="{{ e }}"
+            title="{{ e }}">{{ REMOJI[e] }}</button>
+    {% endfor %}
+  </div>
   <div class="comments">
     {% for c in post.comments %}
-      <div class="comment"><b>{{ c.display_name }}</b> <span class="uname">@{{ c.username }}</span>
+      <div class="comment" id="comment-{{ c.id }}"><b>{{ c.display_name }}</b> <span class="uname">@{{ c.username }}</span>
         {{ c.body|linkify }}{% if c.gif_url %}<img class="comment-gif" src="{{ c.gif_url }}" alt="GIF" loading="lazy">{% endif %}
         {% if c.image_path %}<img class="comment-img" src="/media/{{ c.image_path }}" alt="comment image" loading="lazy">{% endif %}
-        {% if c.video_path %}<video class="comment-video" src="/media/{{ c.video_path }}" controls playsinline preload="metadata"></video>{% endif %}</div>
+        {% if c.video_path %}<video class="comment-video" src="/media/{{ c.video_path }}" controls playsinline preload="metadata"></video>{% endif %}
+        <div class="creact">
+          <span class="rsum" id="rsum-comment-{{ c.id }}">{% for e, n in c.reaction_counts|dictsort %}<button type="button" class="rchip{% if c.my_reaction == e %} mine{% endif %}" data-target="comment" data-id="{{ c.id }}" data-emoji="{{ e }}" title="{{ e }}">{{ REMOJI[e] }} {{ n }}</button>{% endfor %}</span>
+          <button type="button" class="pill ghost react-open" data-target="comment" data-id="{{ c.id }}" title="React">😊</button>
+        </div>
+        <div class="react-picker" id="rpick-comment-{{ c.id }}" hidden>
+          {% for e in ['like', 'love', 'laugh', 'wow', 'sad', 'angry'] %}
+          <button type="button" class="rpick-emoji{% if c.my_reaction == e %} mine{% endif %}"
+                  data-target="comment" data-id="{{ c.id }}" data-emoji="{{ e }}"
+                  title="{{ e }}">{{ REMOJI[e] }}</button>
+          {% endfor %}
+        </div></div>
     {% endfor %}
     <form class="comment-form" method="post" action="/post/{{ post.id }}/comment" enctype="multipart/form-data">
       <input name="body" maxlength="500" placeholder="Write a comment…">
@@ -146,6 +169,108 @@ if (!window.__budzGifInit) {
       e.preventDefault();
       budzGifSearch(e.target.dataset.post, e.target.value);
     }
+  });
+}
+/* Emoji reactions. One delegated handler serves every post card. */
+if (!window.__budzReactInit) {
+  window.__budzReactInit = true;
+  const REMOJI_JS = {like: '👍', love: '❤️', laugh: '😂', wow: '😮', sad: '😢', angry: '😡'};
+  function rsumHTML(target, id, counts, mine) {
+    return Object.keys(counts).sort()
+      .filter(e => e !== 'like' || target === 'comment')
+      .map(e => '<button type="button" class="rchip' + (mine === e ? ' mine' : '') +
+        '" data-target="' + target + '" data-id="' + id + '" data-emoji="' + e +
+        '" title="' + e + '">' + REMOJI_JS[e] + ' ' + counts[e] + '</button>').join('');
+  }
+  async function budzReact(btn) {
+    const target = btn.dataset.target, id = btn.dataset.id, emoji = btn.dataset.emoji;
+    btn.disabled = true;
+    try {
+      const r = await fetch('/react', {
+        method: 'POST',
+        headers: {'Accept': 'application/json'},
+        body: new URLSearchParams({target: target, target_id: id, emoji: emoji})
+      });
+      if (!r.ok) throw 0;
+      const d = await r.json();
+      const sum = document.getElementById('rsum-' + target + '-' + id);
+      if (sum) sum.innerHTML = rsumHTML(target, id, d.counts || {}, d.my_reaction);
+      document.querySelectorAll('#rpick-' + target + '-' + id + ' .rpick-emoji')
+        .forEach(b => b.classList.toggle('mine', b.dataset.emoji === d.my_reaction));
+      if (target === 'post') {
+        const likeBtn = document.querySelector('.react-btn[data-id="' + id + '"]');
+        if (likeBtn) {
+          likeBtn.classList.toggle('on', d.my_reaction === 'like');
+          const rc = likeBtn.querySelector('[data-rc="like"]');
+          if (rc) rc.textContent = (d.counts && d.counts.like) || 0;
+        }
+      }
+    } catch (e) { /* stay quiet; the next tap retries */ }
+    btn.disabled = false;
+  }
+  document.addEventListener('click', (e) => {
+    const open = e.target.closest('.react-open');
+    if (open) {
+      const pk = document.getElementById('rpick-' + open.dataset.target + '-' + open.dataset.id);
+      if (pk) pk.hidden = !pk.hidden;
+      return;
+    }
+    const b = e.target.closest('.react-btn,.rchip,.rpick-emoji');
+    if (!b) return;
+    e.preventDefault();
+    budzReact(b);
+  });
+  /* budzHoldReact: Discord-style hold-to-react. Press-and-hold (touch) or
+     right-click (desktop) on a post's action bar / a comment's reaction row
+     opens that target's emoji picker, reusing the smile button's picker. */
+  const HOLD_MS = 600;
+  let holdTimer = null, suppressHoldClick = false;
+  function holdZone(el) {
+    if (!el || !el.closest) return null;
+    if (el.closest('form')) return null; /* keep delete/report taps intact */
+    return el.closest('.post-actions, .creact');
+  }
+  function budzReactOpenPicker(target, id) {
+    document.querySelectorAll('.react-picker:not([hidden])')
+      .forEach(p => { p.hidden = true; });
+    const pk = document.getElementById('rpick-' + target + '-' + id);
+    if (pk) pk.hidden = false;
+  }
+  function budzHoldOpen(zone) {
+    const ob = zone.querySelector('.react-open');
+    if (ob) budzReactOpenPicker(ob.dataset.target, ob.dataset.id);
+  }
+  function cancelHold() {
+    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+  }
+  /* Eat the click that fires after a hold so it doesn't toggle the like. */
+  document.addEventListener('click', (e) => {
+    if (suppressHoldClick) {
+      suppressHoldClick = false;
+      e.preventDefault(); e.stopPropagation();
+    }
+  }, true);
+  document.addEventListener('touchstart', (e) => {
+    cancelHold();
+    if (e.touches.length !== 1) return;
+    const zone = holdZone(e.target);
+    if (!zone) return;
+    holdTimer = setTimeout(() => {
+      holdTimer = null;
+      suppressHoldClick = true;
+      budzHoldOpen(zone);
+    }, HOLD_MS);
+  }, {passive: true});
+  document.addEventListener('touchmove', cancelHold, {passive: true});
+  document.addEventListener('touchend', cancelHold, {passive: true});
+  document.addEventListener('touchcancel', cancelHold, {passive: true});
+  /* Desktop: right-click opens the picker instead of the browser menu. */
+  document.addEventListener('contextmenu', (e) => {
+    const zone = holdZone(e.target);
+    if (!zone) return;
+    e.preventDefault();
+    suppressHoldClick = true;
+    budzHoldOpen(zone);
   });
 }
 </script>
