@@ -7,7 +7,7 @@ Route map (kept in one file on purpose so it's easy to read top to bottom):
   Public:      /  /register  /login  /logout  /age-check  /terms
                /manifest.webmanifest  (PWA install manifest)
                /api/stream/avatars  /api/stream/avatar/<username>   (stream-PC sync)
-  Social:      /feed  /post  /post/<id>/like  /post/<id>/comment
+  Social:      /feed  /post  /post/<id>/like  /post/<id>/comment  /react
                /post/<id>/delete  /post/<id>/report
                /u/<username>  /u/<username>/followers|following
                /settings (profile + avatar upload)
@@ -59,6 +59,18 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,20}$")
 POST_MAX_LEN = 1000
 FEED_PAGE_SIZE = 10
+
+# Emoji reactions: one per user per target; tapping a different emoji
+# switches it, tapping the same one removes it.
+REACTION_EMOJI = {
+    "like": "👍",
+    "love": "❤️",
+    "laugh": "😂",
+    "wow": "😮",
+    "sad": "😢",
+    "angry": "😡",
+}
+REACTION_TARGETS = ("post", "comment")
 
 # Terms of Service clickwrap version. Bumping this forces every user
 # through /terms again (middleware compares users.terms_version).
@@ -804,22 +816,65 @@ async def _post_rows(db, me_id, where="", args=(), limit=FEED_PAGE_SIZE, offset=
     cur = await db.execute(
         f"""SELECT p.*, u.username, u.display_name, u.avatar_approved, u.equipped_frame,
                    g.name AS group_name,
-                   (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count,
+                   (SELECT COUNT(*) FROM reactions r
+                     WHERE r.target = 'post' AND r.target_id = p.id
+                       AND r.emoji = 'like') AS like_count,
                    (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id) AS comment_count,
-                   (SELECT COUNT(*) FROM likes l2 WHERE l2.post_id = p.id AND l2.user_id = ?) AS liked
+                   (SELECT COUNT(*) FROM reactions r2
+                     WHERE r2.target = 'post' AND r2.target_id = p.id
+                       AND r2.user_id = ? AND r2.emoji = 'like') AS liked
             FROM posts p JOIN users u ON u.id = p.user_id
             LEFT JOIN groups g ON g.id = p.group_id
             {where}
             ORDER BY {order_sql} LIMIT ? OFFSET ?""",
         (me_id, *args, limit, offset))
     posts = [dict(r) for r in await cur.fetchall()]
+    post_ids = [p["id"] for p in posts]
+    # Reaction counts + my reaction per post (one grouped query each).
+    post_counts, post_mine = {}, {}
+    if post_ids:
+        ph = ",".join("?" for _ in post_ids)
+        cur = await db.execute(
+            f"""SELECT target_id, emoji, COUNT(*) FROM reactions
+                WHERE target = 'post' AND target_id IN ({ph})
+                GROUP BY target_id, emoji""", post_ids)
+        for tid, emoji, n in await cur.fetchall():
+            post_counts.setdefault(tid, {})[emoji] = n
+        cur = await db.execute(
+            f"""SELECT target_id, emoji FROM reactions
+                WHERE target = 'post' AND target_id IN ({ph}) AND user_id = ?""",
+            (*post_ids, me_id))
+        post_mine = {tid: emoji for tid, emoji in await cur.fetchall()}
     # Attach comments to each post (fine at v1 scale).
+    comment_ids = []
     for p in posts:
         cur = await db.execute(
             """SELECT c.*, u.username, u.display_name FROM comments c
                JOIN users u ON u.id = c.user_id
                WHERE c.post_id = ? ORDER BY c.created_at ASC""", (p["id"],))
         p["comments"] = [dict(r) for r in await cur.fetchall()]
+        p["reaction_counts"] = post_counts.get(p["id"], {})
+        p["my_reaction"] = post_mine.get(p["id"])
+        comment_ids.extend(c["id"] for c in p["comments"])
+    # Reaction counts + my reaction per comment.
+    ccounts, cmine = {}, {}
+    if comment_ids:
+        ph = ",".join("?" for _ in comment_ids)
+        cur = await db.execute(
+            f"""SELECT target_id, emoji, COUNT(*) FROM reactions
+                WHERE target = 'comment' AND target_id IN ({ph})
+                GROUP BY target_id, emoji""", comment_ids)
+        for tid, emoji, n in await cur.fetchall():
+            ccounts.setdefault(tid, {})[emoji] = n
+        cur = await db.execute(
+            f"""SELECT target_id, emoji FROM reactions
+                WHERE target = 'comment' AND target_id IN ({ph}) AND user_id = ?""",
+            (*comment_ids, me_id))
+        cmine = {tid: emoji for tid, emoji in await cur.fetchall()}
+    for p in posts:
+        for c in p["comments"]:
+            c["reaction_counts"] = ccounts.get(c["id"], {})
+            c["my_reaction"] = cmine.get(c["id"])
     return posts
 
 
@@ -925,6 +980,40 @@ async def create_post(request: Request, db=Depends(get_db), user=Depends(current
     return RedirectResponse(dest, status_code=303)
 
 
+async def _toggle_reaction(db, user_id: int, target: str, target_id: int,
+                           emoji: str):
+    """Toggle one user's reaction on a target.
+
+    Same emoji twice removes it; a different emoji switches it.
+    Returns (active, counts): active = whether the emoji is now the user's
+    reaction, counts = emoji -> total for the target.
+    """
+    cur = await db.execute(
+        "SELECT emoji FROM reactions WHERE user_id = ? AND target = ? AND target_id = ?",
+        (user_id, target, target_id))
+    row = await cur.fetchone()
+    if row and row["emoji"] == emoji:
+        await db.execute(
+            "DELETE FROM reactions WHERE user_id = ? AND target = ? AND target_id = ?",
+            (user_id, target, target_id))
+        active = False
+    else:
+        await db.execute(
+            """INSERT INTO reactions (user_id, target, target_id, emoji, created_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(user_id, target, target_id)
+               DO UPDATE SET emoji = excluded.emoji, created_at = excluded.created_at""",
+            (user_id, target, target_id, emoji, _now()))
+        active = True
+    await db.commit()
+    cur = await db.execute(
+        "SELECT emoji, COUNT(*) FROM reactions WHERE target = ? AND target_id = ?"
+        " GROUP BY emoji",
+        (target, target_id))
+    counts = {e: n for e, n in await cur.fetchall()}
+    return active, counts
+
+
 @app.post("/post/{post_id}/like")
 async def toggle_like(request: Request, post_id: int, db=Depends(get_db),
                       user=Depends(current_user)):
@@ -934,18 +1023,35 @@ async def toggle_like(request: Request, post_id: int, db=Depends(get_db),
     cur = await db.execute("SELECT id FROM posts WHERE id = ?", (post_id,))
     if not await cur.fetchone():
         return RedirectResponse("/feed?msg=Post+not+found", status_code=303)
-    cur = await db.execute("SELECT 1 FROM likes WHERE user_id = ? AND post_id = ?",
-                           (user["id"], post_id))
-    if await cur.fetchone():
-        await db.execute("DELETE FROM likes WHERE user_id = ? AND post_id = ?",
-                         (user["id"], post_id))
-    else:
-        try:
-            await db.execute("INSERT INTO likes (user_id, post_id, created_at) VALUES (?, ?, ?)",
-                             (user["id"], post_id, _now()))
-        except sqlite3.IntegrityError:
-            pass  # raced double-tap: the like already landed
-    await db.commit()
+    await _toggle_reaction(db, user["id"], "post", post_id, "like")
+    back = request.headers.get("referer", "/feed")
+    return RedirectResponse(back, status_code=303)
+
+
+@app.post("/react")
+async def react(request: Request, db=Depends(get_db), user=Depends(current_user),
+                target: str = Form(...), target_id: int = Form(...),
+                emoji: str = Form(...)):
+    """Emoji reaction toggle for posts and comments (fetch-friendly)."""
+    redir = login_required(user)
+    if redir:
+        return redir
+    target = (target or "").strip().lower()
+    emoji = (emoji or "").strip().lower()
+    if target not in REACTION_TARGETS or emoji not in REACTION_EMOJI:
+        return JSONResponse({"ok": False, "error": "bad target or emoji"},
+                            status_code=400)
+    table = "posts" if target == "post" else "comments"
+    cur = await db.execute(f"SELECT id FROM {table} WHERE id = ?", (target_id,))
+    if not await cur.fetchone():
+        return JSONResponse({"ok": False, "error": f"{target} not found"},
+                            status_code=404)
+    active, counts = await _toggle_reaction(db, user["id"], target, target_id, emoji)
+    payload = {"ok": True, "active": active,
+               "my_reaction": emoji if active else None,
+               "counts": counts}
+    if "application/json" in (request.headers.get("accept") or ""):
+        return JSONResponse(payload)
     back = request.headers.get("referer", "/feed")
     return RedirectResponse(back, status_code=303)
 
@@ -1278,6 +1384,13 @@ async def delete_post(request: Request, post_id: int, db=Depends(get_db),
                 os.remove(os.path.join(MEDIA_DIR, row["image_path"]))
             except OSError:
                 pass
+        # Reactions reference targets polymorphically (no FK cascade); clear
+        # this post's reactions and its comments' reactions first.
+        await db.execute(
+            "DELETE FROM reactions WHERE (target = 'post' AND target_id = ?)"
+            " OR (target = 'comment' AND target_id IN"
+            " (SELECT id FROM comments WHERE post_id = ?))",
+            (post_id, post_id))
         await db.execute("DELETE FROM posts WHERE id = ?", (post_id,))
         await db.commit()
         msg = "Post+deleted"
@@ -1923,6 +2036,11 @@ async def report_resolve(request: Request, report_id: int, db=Depends(get_db),
                     os.remove(os.path.join(MEDIA_DIR, prow["image_path"]))
                 except OSError:
                     pass
+            await db.execute(
+                "DELETE FROM reactions WHERE (target = 'post' AND target_id = ?)"
+                " OR (target = 'comment' AND target_id IN"
+                " (SELECT id FROM comments WHERE post_id = ?))",
+                (row["post_id"], row["post_id"]))
             await db.execute("DELETE FROM posts WHERE id = ?", (row["post_id"],))
         await db.execute("UPDATE reports SET resolved = 1 WHERE id = ?", (report_id,))
         await db.commit()

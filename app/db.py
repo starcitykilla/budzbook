@@ -57,6 +57,19 @@ CREATE TABLE IF NOT EXISTS likes (
     PRIMARY KEY (user_id, post_id)
 );
 
+-- Emoji reactions (2026-09-17): replaces the post-only `likes` table.
+-- `target` is 'post' or 'comment'; one reaction per user per target.
+CREATE TABLE IF NOT EXISTS reactions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    target     TEXT NOT NULL,
+    target_id  INTEGER NOT NULL,
+    emoji      TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (user_id, target, target_id)
+);
+CREATE INDEX IF NOT EXISTS idx_reactions_target ON reactions(target, target_id);
+
 CREATE TABLE IF NOT EXISTS comments (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     post_id    INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
@@ -264,6 +277,31 @@ async def _migrate_social(db) -> None:
         col = coldef.split()[0]
         if col not in cols:
             await db.execute(f"ALTER TABLE {table} ADD COLUMN {coldef}")
+
+    # --- Emoji reactions (2026-09-17): fold legacy `likes` rows into
+    # `reactions` as target='post', emoji='like', then drop the old table.
+    cur = await db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='likes'")
+    if await cur.fetchone():
+        # Defensive: the table normally comes from SCHEMA, but the
+        # migration must work even if it somehow does not exist yet.
+        await db.execute("""CREATE TABLE IF NOT EXISTS reactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            target TEXT NOT NULL,
+            target_id INTEGER NOT NULL,
+            emoji TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE (user_id, target, target_id))""")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_reactions_target"
+                         " ON reactions(target, target_id)")
+        cur = await db.execute("SELECT COUNT(*) FROM reactions")
+        if (await cur.fetchone())[0] == 0:
+            await db.execute(
+                """INSERT OR IGNORE INTO reactions
+                       (user_id, target, target_id, emoji, created_at)
+                   SELECT user_id, 'post', post_id, 'like', created_at FROM likes""")
+        await db.execute("DROP TABLE likes")
 
 
 async def init_db() -> None:
