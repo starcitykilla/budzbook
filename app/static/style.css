@@ -552,3 +552,35 @@ body.has-ticker .topbar { top: 50px; }
 .stream-name{font-weight:800;color:var(--gold)}
 .stream-title{font-size:14px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stream-sub{font-size:12px;color:var(--muted);margin-top:2px}
+
+/* ---- @mention autocomplete + linkified mentions ---- */
+a.mention { color: var(--gold); font-weight: 700; text-decoration: none; }
+a.mention:hover { text-decoration: underline; }
+.mention-dropdown {
+  position: absolute; z-index: 200;
+  background: #101814; border: 1px solid var(--gold);
+  border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.65);
+  overflow: hidden;
+}
+.mention-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; cursor: pointer;
+}
+.mention-row.sel, .mention-row:hover { background: rgba(232,197,71,.13); }
+.mention-row img.mavatar {
+  width: 30px; height: 30px; border-radius: 50%;
+  object-fit: cover; border: 1px solid var(--line); flex: none;
+}
+.mention-row .minitial {
+  width: 30px; height: 30px; border-radius: 50%; flex: none;
+  background: var(--card2); color: var(--gold);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; border: 1px solid var(--line);
+}
+.mention-row .mnames { line-height: 1.25; min-width: 0; }
+.mention-row .mdisplay {
+  font-weight: 700; font-size: 14px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mention-row .muname { color: var(--muted); font-size: 12px; }
+.mention-empty { padding: 10px 12px; color: var(--muted); font-size: 13px; }
