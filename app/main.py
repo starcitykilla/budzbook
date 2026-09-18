@@ -18,6 +18,7 @@ Route map (kept in one file on purpose so it's easy to read top to bottom):
 Age gate: everything except /age-check, /static, /media and /api/stream/*
 requires a signed 21+ cookie (see the age_gate middleware below).
 """
+import asyncio
 import base64
 import json
 import math
@@ -2452,4 +2453,343 @@ async def picks_page(request: Request, user=Depends(current_user), msg: str = ""
     return templates.TemplateResponse(request, "picks.html",
                                       {"user": user, "msg": msg,
                                        "picks": load_budz_picks()})
+
+
+# --------------------------------------------------------------------------
+# Knight & Crown — Two Shores game hub (/game)
+#
+# The game's social media. Live widgets are fed by the resonance backend
+# (FastAPI, KHAT_BACKEND_URL — 127.0.0.1:8771 on the stream PC) through
+# server-side proxies only: the browser never sees the backend URL.
+# Fail-soft everywhere — when the backend is unreachable the page still
+# renders with "signal lost" markers instead of 500s.
+#
+# EXTENSION POINTS (grow here, don't scatter):
+#   _khat_get / _khat_post  — every backend call goes through these two.
+#   get_game_world / get_game_peaks / get_game_raid / get_game_cycle —
+#       cached read helpers; add new ones in the same shape.
+#   maybe_post_game_tip — the World Tips auto-poster (Jarvis's in-world
+#       voice). New event types = new meta-keyed branch.
+#   post_as_game — programmatic posts from the @knightandcrown account
+#       (World Tips, Crown Translations, raid calls).
+# --------------------------------------------------------------------------
+
+# Canon (single source of truth: KNIGHT_AND_CROWN_MMO_DESIGN.md).
+# Lore constants live here so templates stay dumb.
+GAME_TITLE = "KNIGHT & CROWN — Two Shores"
+GAME_TAGLINE = "He was left where we'd find him."
+GAME_ACCOUNT = "knightandcrown"   # system user; owns the game feed
+GAME_ANTENNAS = (
+    # (faction key, display name, window label, tint name, css color)
+    ("saxis", "Saxis Technicals", "11:11", "moon-blue", "#7fb4ff"),
+    ("crysfeld", "Crysfeld Crowns", "5:55", "marsh-gold", "#e8c15a"),
+    ("dunreef", "Dun Reef Wardens", "the middle", "black water", "#9aa7b0"),
+)
+GAME_ANTENNA_NAMES = {k: name for k, name, _, _, _ in GAME_ANTENNAS}
+GAME_POLYMATHS = ("technical", "crown", "warden")
+GAME_TIDE_EXPOSED_FT = 2.2        # low tide exposes the Dun Reef root
+GAME_VOW_DAY = date(2028, 4, 20)  # Vow Day endgame raid (canon fallback)
+GAME_EK_HIGH = 0.85               # cyan border threshold (canon)
+
+_khat_env = (os.environ.get("KHAT_BACKEND_URL") or "").strip()
+KHAT_BACKEND_URL = _khat_env or "http://127.0.0.1:8771"
+KHAT_TIMEOUT_S = 8
+
+# Tiny TTL cache: (fetched_at, data). Failures are cached too (short TTL)
+# so a down backend doesn't stall every page load on timeouts.
+_game_cache = {}
+_GAME_TTLS = {"world": 60, "peaks": 60, "raid": 60, "cycle": 30}
+
+
+async def _khat_get(path, params=None):
+    """GET the resonance backend. Parsed JSON, or None on any failure."""
+    try:
+        async with httpx.AsyncClient(timeout=KHAT_TIMEOUT_S) as hc:
+            r = await hc.get(KHAT_BACKEND_URL.rstrip("/") + path,
+                             params=params or {})
+            r.raise_for_status()
+            return r.json()
+    except Exception:
+        return None
+
+
+async def _khat_post(path, json_body=None, headers=None):
+    """POST the resonance backend. (status_code, parsed JSON or {})."""
+    try:
+        async with httpx.AsyncClient(timeout=KHAT_TIMEOUT_S) as hc:
+            r = await hc.post(KHAT_BACKEND_URL.rstrip("/") + path,
+                              json=json_body or {}, headers=headers or {})
+            try:
+                body = r.json()
+            except Exception:
+                body = {}
+            return r.status_code, body
+    except Exception:
+        return 0, {"detail": "resonance backend unreachable"}
+
+
+async def _khat_cached(key, path, params=None):
+    ts, data = _game_cache.get(key, (0.0, None))
+    if ts > 0 and time.time() - ts < _GAME_TTLS[key]:
+        return data
+    data = await _khat_get(path, params)
+    _game_cache[key] = (time.time(), data)
+    return data
+
+
+async def get_game_world():
+    """Combined snapshot: tide, antennas, E_k(t), raid miracle. None if down."""
+    return await _khat_cached("world", "/world/state")
+
+
+async def get_game_peaks():
+    """Latest E_k(t) resonance peaks. {"peaks": [...]} or None if down."""
+    return await _khat_cached("peaks", "/resonance/peaks", {"limit": 10})
+
+
+async def get_game_raid():
+    """Next Vow Day raid: vow_day, raid_time, cycle_id, status. None if down."""
+    return await _khat_cached("raid", "/raid/next")
+
+
+async def get_game_cycle(cycle_id):
+    """Raid cycle state incl. roster of player ids. None if down."""
+    return await _khat_get(f"/raid/cycles/{cycle_id}")
+
+
+async def khat_create_player(name, faction, polymath):
+    """Create a backend player. (201, data) on success; data has player_token."""
+    return await _khat_post("/players",
+                            {"name": name, "faction": faction,
+                             "polymath": polymath})
+
+
+async def khat_join_raid(cycle_id, player_id, player_token):
+    """Sign a player up for a raid cycle. (200, data) on success."""
+    return await _khat_post(f"/raid/cycles/{cycle_id}/join",
+                            {"player_id": player_id},
+                            {"X-Player-Token": player_token})
+
+
+async def post_as_game(db, body):
+    """Post to the feed as @knightandcrown. Returns post id, or None."""
+    try:
+        cur = await db.execute("SELECT id FROM users WHERE username = ? LIMIT 1",
+                               (GAME_ACCOUNT,))
+        row = await cur.fetchone()
+        if not row:
+            return None
+        if await _recent_duplicate(db, "posts", "user_id = ? AND body = ?",
+                                   (row["id"], body)):
+            return None
+        cur = await db.execute(
+            "INSERT INTO posts (user_id, body, kind, created_at)"
+            " VALUES (?, ?, 'post', ?)", (row["id"], body, _now()))
+        pid = cur.lastrowid
+        await _save_hashtags(db, pid, body)
+        await db.commit()
+        return pid
+    except Exception:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        return None
+
+
+async def _game_tip_posted(db, key):
+    cur = await db.execute("SELECT 1 FROM meta WHERE key = ?", (key,))
+    return bool(await cur.fetchone())
+
+
+async def _game_tip_mark(db, key):
+    await db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                     (key, _now()))
+    await db.commit()
+
+
+async def maybe_post_game_tip(db, world):
+    """World Tips auto-poster (Jarvis's in-world voice). One post per event
+    occurrence, keyed in meta — same shape as maybe_post_golive."""
+    if not world:
+        return
+    try:
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        antennas = (world.get("antenna") or {}).get("antennas") or {}
+        for win_key, meta_key, body in (
+            ("11:11", f"game_tip_1111_{day}",
+             "🌊 World Tip — the 11:11 window is open. Moon-blue on the water. "
+             "Saxis Technicals: read the tide, the root shows itself at 2.2 ft. "
+             "#knightandcrown"),
+            ("5:55", f"game_tip_555_{day}",
+             "🌊 World Tip — 5:55. Gold beads glowing on the east shore. "
+             "Crysfeld Crowns: translate what the water tells you. "
+             "#knightandcrown"),
+        ):
+            win = antennas.get(win_key) or {}
+            if win.get("open") and not await _game_tip_posted(db, meta_key):
+                if await post_as_game(db, body):
+                    await _game_tip_mark(db, meta_key)
+        tide = world.get("tide") or {}
+        try:
+            height = float(tide.get("height_ft", 99))
+        except (TypeError, ValueError):
+            height = 99
+        if height <= GAME_TIDE_EXPOSED_FT:
+            key = f"game_tip_root_{day}"
+            if not await _game_tip_posted(db, key):
+                if await post_as_game(
+                        db, "🌊 World Tip — low tide. The Dun Reef root is "
+                            "exposed. Walk the middle while you can — high "
+                            "water hides it again. #knightandcrown"):
+                    await _game_tip_mark(db, key)
+        ek = world.get("ek") or {}
+        try:
+            ek_val = float(ek.get("ek", 0))
+        except (TypeError, ValueError):
+            ek_val = 0
+        if ek.get("ek_high") or ek_val > GAME_EK_HIGH:
+            key = f"game_tip_ekhigh_{day}"
+            if not await _game_tip_posted(db, key):
+                if await post_as_game(
+                        db, "🌊 World Tip — Eₖ(t) running hot past 0.85. Cyan "
+                            "on the bar. Both antennas open — this is the "
+                            "moment. #knightandcrown"):
+                    await _game_tip_mark(db, key)
+    except Exception:
+        pass
+
+
+def _game_countdown(raid_time_iso):
+    """(days, hours, mins) until raid_time_iso; None if unparseable."""
+    try:
+        rt = datetime.fromisoformat(raid_time_iso)
+        if rt.tzinfo is None:
+            rt = rt.replace(tzinfo=timezone.utc)
+        delta = rt - datetime.now(timezone.utc)
+        secs = int(delta.total_seconds())
+        if secs < 0:
+            return (0, 0, 0)
+        return (secs // 86400, (secs % 86400) // 3600, (secs % 3600) // 60)
+    except Exception:
+        return None
+
+
+@app.get("/game")
+async def game_hub(request: Request, user=Depends(current_user),
+                   db=Depends(get_db), msg: str = ""):
+    """Knight & Crown game hub: live world widgets, heir roster, E_k peaks,
+    raid board, and the game's feed. Login-gated."""
+    redir = login_required(user)
+    if redir:
+        return redir
+    world, peaks_data, raid = await asyncio.gather(
+        get_game_world(), get_game_peaks(), get_game_raid())
+    await maybe_post_game_tip(db, world)
+
+    cycle = None
+    if raid and raid.get("cycle_id"):
+        cycle = await get_game_cycle(raid["cycle_id"])
+
+    cur = await db.execute(
+        """SELECT h.*, u.username, u.display_name FROM game_heirs h
+           JOIN users u ON u.id = h.user_id ORDER BY h.created_at ASC""")
+    heirs = [dict(r) for r in await cur.fetchall()]
+    heir_by_player = {h["player_id"]: h for h in heirs}
+    cur = await db.execute("SELECT * FROM game_heirs WHERE user_id = ?",
+                           (user["id"],))
+    my_heir_row = await cur.fetchone()
+    my_heir = dict(my_heir_row) if my_heir_row else None
+
+    countdown = _game_countdown((raid or {}).get("raid_time") or "")
+    peaks = (peaks_data or {}).get("peaks") or []
+
+    feed_posts = await _post_rows(db, user["id"],
+                                 "WHERE u.username = ?", (GAME_ACCOUNT,),
+                                 10, 0)
+    return templates.TemplateResponse(request, "game.html",
+        {"user": user, "msg": msg,
+         "game_title": GAME_TITLE, "game_tagline": GAME_TAGLINE,
+         "antennas_meta": GAME_ANTENNAS,
+         "antenna_names": GAME_ANTENNA_NAMES,
+         "world": world, "world_live": world is not None,
+         "peaks": peaks, "raid": raid, "cycle": cycle,
+         "countdown": countdown,
+         "heirs": heirs, "heir_by_player": heir_by_player,
+         "my_heir": my_heir, "feed_posts": feed_posts})
+
+
+@app.post("/game/enlist")
+async def game_enlist(request: Request, user=Depends(current_user),
+                      db=Depends(get_db),
+                      heir_name: str = Form(""),
+                      antenna: str = Form(""),
+                      polymath: str = Form("")):
+    """Enlist as an heir: create a resonance-backend player and link it to
+    this BudzBook account. One heir per user."""
+    redir = login_required(user)
+    if redir:
+        return redir
+    heir_name = (heir_name or "").strip()[:40]
+    antenna = (antenna or "").strip().lower()
+    polymath = (polymath or "").strip().lower()
+    if (not heir_name or antenna not in GAME_ANTENNA_NAMES
+            or polymath not in GAME_POLYMATHS):
+        return RedirectResponse(
+            "/game?msg=Pick+a+name,+an+antenna,+and+a+polymath", status_code=303)
+    cur = await db.execute("SELECT id FROM game_heirs WHERE user_id = ?",
+                           (user["id"],))
+    if await cur.fetchone():
+        return RedirectResponse("/game?msg=You+already+have+an+heir",
+                                status_code=303)
+    status, data = await khat_create_player(heir_name, antenna, polymath)
+    if status != 201 or not data.get("player_token"):
+        return RedirectResponse(
+            "/game?msg=Resonance+backend+unreachable,+try+again+soon",
+            status_code=303)
+    try:
+        await db.execute(
+            """INSERT INTO game_heirs
+               (user_id, player_id, player_token, heir_name, antenna,
+                polymath, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (user["id"], data["id"], data["player_token"], heir_name,
+             antenna, polymath, _now()))
+        await db.commit()
+    except sqlite3.IntegrityError:
+        pass  # raced a double-tap; the first write won
+    return RedirectResponse(
+        "/game?msg=Heir+created,+welcome+to+the+Sound", status_code=303)
+
+
+@app.post("/game/raid/join")
+async def game_raid_join(request: Request, user=Depends(current_user),
+                         db=Depends(get_db)):
+    """Sign the caller's heir up for the next Vow Day raid cycle."""
+    redir = login_required(user)
+    if redir:
+        return redir
+    cur = await db.execute("SELECT * FROM game_heirs WHERE user_id = ?",
+                           (user["id"],))
+    heir = await cur.fetchone()
+    if not heir:
+        return RedirectResponse("/game?msg=Enlist+an+heir+first",
+                                status_code=303)
+    raid = await get_game_raid()
+    if not raid or not raid.get("cycle_id"):
+        return RedirectResponse("/game?msg=Raid+board+unreachable",
+                                status_code=303)
+    status, data = await khat_join_raid(raid["cycle_id"], heir["player_id"],
+                                        heir["player_token"])
+    detail = str((data or {}).get("detail") or "")
+    if status in (200, 201):
+        return RedirectResponse(
+            "/game?msg=Signed+up+for+the+Vow+Day+raid", status_code=303)
+    if "already in this raid" in detail:
+        return RedirectResponse("/game?msg=Already+signed+up", status_code=303)
+    if "raid is full" in detail:
+        return RedirectResponse("/game?msg=Raid+is+full+(20+heirs)",
+                                status_code=303)
+    return RedirectResponse("/game?msg=Raid+signup+failed,+try+again+soon",
+                            status_code=303)
 

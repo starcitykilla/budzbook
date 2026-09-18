@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}Knight &amp; Crown — BudzBook{% endblock %}
+{% block content %}
+<div class="game-hub">
+  <header class="game-hero">
+    <div class="game-hero-titles">
+      <h2>⚔️👑 {{ game_title }}</h2>
+      <p class="game-tagline"><em>“{{ game_tagline }}”</em></p>
+      <p class="game-sub">Blindman Gaming’s waterman fantasy MMO — the promise game.
+        Players choose antenna, not class.</p>
+    </div>
+  </header>
+
+  {# ---- LIVE WORLD WIDGETS (server-proxied; fail-soft) ---- #}
+  <section class="game-section">
+    <h3>🌊 The Sound — live</h3>
+    {% if world_live %}
+    <div class="widget-grid">
+      <div class="widget tide{% if world.tide.root_exposed %} exposed{% endif %}">
+        <div class="widget-label">Tide</div>
+        <div class="widget-big">{{ "%.1f"|format(world.tide.height_ft|float) }} ft</div>
+        <div class="widget-sub">
+          {% if world.tide.root_exposed %}
+          <span class="badge badge-gold">ROOT EXPOSED</span> — walk the middle
+          {% else %}
+          <span class="badge">root hidden</span> — exposed at {{ "%.1f"|format(2.2) }} ft
+          {% endif %}
+        </div>
+      </div>
+      {% for key, meta in [("11:11", antennas_meta[0]), ("5:55", antennas_meta[1])] %}
+      {% set win = world.antenna.antennas[key] %}
+      <div class="widget antenna" style="--tint: {{ meta[4] }}">
+        <div class="widget-label">{{ meta[1] }} — {{ meta[2] }}</div>
+        <div class="widget-big">
+          {% if win.open %}<span class="badge badge-open">OPEN</span>
+          {% else %}<span class="badge">closed</span>{% endif %}
+        </div>
+        <div class="widget-sub">{{ meta[3] }} · strength {{ "%.0f"|format((win.strength|float) * 100) }}%</div>
+      </div>
+      {% endfor %}
+      <div class="widget ek{% if world.ek.ek_high %} ek-high{% endif %}">
+        <div class="widget-label">Eₖ(t)</div>
+        <div class="widget-big">{{ "%.3f"|format(world.ek.ek|float) }}</div>
+        <div class="widget-sub">
+          {% if world.ek.ek_high %}<span class="badge badge-cyan">CYAN — past 0.85</span>
+          {% else %}threshold 0.85{% endif %}
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <div class="widget-grid">
+      <div class="widget offline">
+        <div class="widget-label">Resonance backend</div>
+        <div class="widget-big">signal lost</div>
+        <div class="widget-sub">Live tide, antenna, and Eₖ(t) widgets will appear when the backend is up.</div>
+      </div>
+    </div>
+    {% endif %}
+  </section>
+
+  {# ---- VOW DAY COUNTDOWN + RAID BOARD ---- #}
+  <section class="game-section">
+    <h3>⚔️ Vow Day raid</h3>
+    {% if raid %}
+    <div class="raid-banner">
+      <div class="countdown">
+        {% if countdown %}
+        <span class="cd-num">{{ countdown[0] }}</span>d
+        <span class="cd-num">{{ countdown[1] }}</span>h
+        <span class="cd-num">{{ countdown[2] }}</span>m
+        {% else %}
+        <span class="cd-num">—</span>
+        {% endif %}
+      </div>
+      <div class="raid-meta">
+        <div><strong>April 20, 2028</strong> — sunrise low tide, middle of the Sound</div>
+        <div class="widget-sub">status: {{ raid.status }} · {{ (cycle.roster_count if cycle else 0) }}/{{ raid.raid_size }} heirs signed</div>
+      </div>
+      {% if my_heir %}
+      <form method="post" action="/game/raid/join" class="raid-join">
+        <button class="btn btn-gold" type="submit">Sign my heir up</button>
+      </form>
+      {% else %}
+      <p class="widget-sub">Enlist an heir below to join the raid.</p>
+      {% endif %}
+    </div>
+    {% if cycle and cycle.roster %}
+    <div class="roster-list">
+      {% for pid in cycle.roster %}
+      {% set h = heir_by_player.get(pid) %}
+      <span class="heir-chip">{{ h.heir_name if h else ("heir #" ~ pid) }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% else %}
+    <p class="widget-sub">Raid board offline — the backend will publish the next Vow Day cycle here.</p>
+    {% endif %}
+  </section>
+
+  {# ---- HEIR ROSTER + ENLIST ---- #}
+  <section class="game-section">
+    <h3>🧭 Heir roster</h3>
+    {% if heirs %}
+    <div class="heir-grid">
+      {% for h in heirs %}
+      <div class="heir-card">
+        <div class="heir-name">{{ h.heir_name }}</div>
+        <div class="heir-sub">@{{ h.username }}</div>
+        <div class="heir-tags">
+          <span class="badge">{{ antenna_names.get(h.antenna, h.antenna) }}</span>
+          <span class="badge">{{ h.polymath }}</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="widget-sub">No heirs yet. The Sound is waiting.</p>
+    {% endif %}
+    {% if not my_heir %}
+    <form method="post" action="/game/enlist" class="enlist-form">
+      <h4>Enlist as an heir</h4>
+      <label>Heir name <input name="heir_name" maxlength="40" required placeholder="e.g. Dunreath"></label>
+      <label>Antenna
+        <select name="antenna" required>
+          <option value="">— choose —</option>
+          <option value="saxis">Saxis Technicals (11:11, moon-blue)</option>
+          <option value="crysfeld">Crysfeld Crowns (5:55, marsh-gold)</option>
+          <option value="dunreef">Dun Reef Wardens (the middle)</option>
+        </select>
+      </label>
+      <label>Polymath
+        <select name="polymath" required>
+          <option value="">— choose —</option>
+          <option value="technical">Technical — waterman + engineer + scribe</option>
+          <option value="crown">Crown — braider + translator + goldsmith</option>
+          <option value="warden">Warden — keeper of resonance</option>
+        </select>
+      </label>
+      <button class="btn btn-gold" type="submit">Enlist</button>
+    </form>
+    {% else %}
+    <p class="widget-sub">You sail as <strong>{{ my_heir.heir_name }}</strong>
+      ({{ antenna_names.get(my_heir.antenna, my_heir.antenna) }} · {{ my_heir.polymath }}).</p>
+    {% endif %}
+  </section>
+
+  {# ---- E_K PEAK LEADERBOARD ---- #}
+  <section class="game-section">
+    <h3>⚡ Eₖ peak leaderboard</h3>
+    {% if peaks %}
+    <ol class="peak-list">
+      {% for p in peaks %}
+      <li class="peak-row">
+        <span class="peak-ek">{{ "%.3f"|format(p.ek_value|float) }}</span>
+        <span class="peak-sync">sync {{ p.sync_score }}</span>
+        <span class="peak-who">
+          {% for pid in p.player_ids %}
+          {% set h = heir_by_player.get(pid) %}{{ h.heir_name if h else ("heir #" ~ pid) }}{{ ", " if not loop.last }}
+          {% endfor %}
+        </span>
+        <span class="peak-ts">{{ p.ts|fdt if p.ts }}</span>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p class="widget-sub">No peaks logged yet — sync past 85 in a limbic session to carve your name here.</p>
+    {% endif %}
+  </section>
+
+  {# ---- GAME FEED (@knightandcrown: World Tips + Crown Translations) ---- #}
+  <section class="game-section">
+    <h3>📜 From the Sound</h3>
+    {% if feed_posts %}
+    <div class="game-feed">
+      {% for p in feed_posts %}
+      <article class="game-post">
+        <div class="game-post-head"><strong>@{{ p.username }}</strong>
+          <span class="widget-sub">{{ p.created_at|fdt }}</span></div>
+        <div class="game-post-body">{{ p.body|linkify }}</div>
+        <div class="widget-sub">👍 {{ p.like_count }} · 💬 {{ p.comment_count }}</div>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="widget-sub">The game hasn't spoken yet. World Tips will appear here when antennas open and tides turn.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

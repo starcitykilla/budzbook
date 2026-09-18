@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{% block title %}BudzBook{% endblock %}</title>
-<link rel="stylesheet" href="/static/style.css?v=20260917b">
+<link rel="stylesheet" href="/static/style.css?v=20260918">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#0d1512">
 <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
@@ -22,6 +22,7 @@
       <a href="/leaderboard" title="Casino leaderboard">🏆</a>
       <a href="/sportsbook" title="Budz Book">📖</a>
       <a href="/picks" title="Budz Picks">🎯</a>
+      <a href="/game" title="Knight & Crown">👑</a>
       <a href="/trending" title="Trending">📈</a>
       <a href="/groups" title="Groups">👥</a>
       <a href="/clips" title="Clips">🎬</a>
@@ -64,6 +65,7 @@ if ("serviceWorker" in navigator) {
   <a href="/watch" data-tab="watch"><span class="ti">📺</span><span class="tl">Watch</span></a>
   <a href="/leaderboard" data-tab="leaderboard"><span class="ti">🏆</span><span class="tl">Board</span></a>
   <a href="/picks" data-tab="picks"><span class="ti">🎯</span><span class="tl">Picks</span></a>
+  <a href="/game" data-tab="game"><span class="ti">👑</span><span class="tl">Game</span></a>
   <a href="/dispo" data-tab="dispo"><span class="ti">📍</span><span class="tl">Dispo</span></a>
   <a href="/wallet" data-tab="wallet"><span class="ti">👛</span><span class="tl">Wallet</span></a>
   <a href="/u/{{ user.username }}" data-tab="profile"><span class="ti">👤</span><span class="tl">You</span></a>
