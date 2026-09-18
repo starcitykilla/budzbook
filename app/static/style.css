@@ -584,3 +584,9 @@ a.mention:hover { text-decoration: underline; }
 }
 .mention-row .muname { color: var(--muted); font-size: 12px; }
 .mention-empty { padding: 10px 12px; color: var(--muted); font-size: 13px; }
+
+/* Double-submit guard: submitted buttons go quiet while the request flies. */
+button[type="submit"]:disabled, input[type="submit"]:disabled {
+  opacity: .55;
+  cursor: wait;
+}
