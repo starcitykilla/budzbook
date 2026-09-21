@@ -72,7 +72,7 @@
     {% else %}
       <span class="muted">Franchise linked</span>
     {% endif %}
-    <span class="muted">League {{ franchise.league_id }}{% if franchise.week_label %} · {{ franchise.week_label }} exports{% endif %}{% if franchise.current_week %} · on Week {{ franchise.current_week }}{% endif %}</span>
+    <span class="muted">League {{ franchise.league_id }}{% if franchise.week_label %} · {{ franchise.week_label }} exports{% endif %}{% if franchise.current_week %} · on Week {{ franchise.current_week }}{% endif %}{% if franchise.age %} · updated {{ franchise.age }}{% endif %}</span>
     <a class="btn" href="/franchise?u={{ profile.username }}">View franchise</a>
   </div>
 </div>

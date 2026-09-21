@@ -954,6 +954,152 @@ def _franchise_linked_league_ids(user_id, leagues, default_owner_id=None):
     return mine
 
 
+def _franchise_parse_ts(ts):
+    """Parse a franchise batch_ts ("%Y%m%dT%H%M%SZ", UTC) to an aware datetime, or None."""
+    try:
+        return datetime.strptime(str(ts), "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _franchise_days_since(ts):
+    """Whole days since a batch_ts, or None when the timestamp is unknown."""
+    dt = _franchise_parse_ts(ts)
+    if not dt:
+        return None
+    return max(0, int((datetime.now(timezone.utc) - dt).total_seconds() // 86400))
+
+
+def _franchise_age_label(ts):
+    """Human "X ago" label for a batch_ts. Returns "" when unknown — never fabricates."""
+    dt = _franchise_parse_ts(ts)
+    if not dt:
+        return ""
+    secs = max(0, (datetime.now(timezone.utc) - dt).total_seconds())
+    if secs < 90:
+        return "just now"
+    mins = int(secs // 60)
+    if mins < 60:
+        return "%d minute%s ago" % (mins, "" if mins == 1 else "s")
+    hrs = mins // 60
+    if hrs < 48:
+        return "%d hour%s ago" % (hrs, "" if hrs == 1 else "s")
+    days = hrs // 24
+    return "%d day%s ago" % (days, "" if days == 1 else "s")
+
+
+def _franchise_user_latest_ts(user_id, leagues, default_owner_id=None):
+    """Newest batch_ts for exports owned by this user.
+
+    The default league's exports arrive through the global token (no owner),
+    so for its owner they count as that user's own updates.
+    """
+    latest = ""
+    uid = str(user_id)
+    for r in _franchise_meta_rows():
+        if r.get("owner_user_id") is not None and str(r["owner_user_id"]) == uid:
+            if r["batch_ts"] > latest:
+                latest = r["batch_ts"]
+    if (not latest and default_owner_id is not None
+            and str(user_id) == str(default_owner_id)):
+        latest = leagues.get(FRANCHISE_DEFAULT_LEAGUE, {}).get("latest_ts", "")
+    return latest
+
+
+def _franchise_leader_line(cat, p):
+    """One-line stat blurb for a league-leader entry."""
+    if cat == "passing":
+        return "%s yds, %s TD, %s INT" % (p.get("passYds", 0), p.get("passTDs", 0), p.get("passInts", 0))
+    if cat == "rushing":
+        return "%s yds, %s att, %s TD" % (p.get("rushYds", 0), p.get("rushAtt", 0), p.get("rushTDs", 0))
+    if cat == "receiving":
+        return "%s yds, %s rec, %s TD" % (p.get("recYds", 0), p.get("recCatches", 0), p.get("recTDs", 0))
+    if cat == "sacks":
+        return "%s sacks" % p.get("defSacks", 0)
+    if cat == "ints":
+        return "%s INT" % p.get("defInts", 0)
+    return "%s tackles" % p.get("defTotalTackles", 0)
+
+
+_FRANCHISE_CAT_NAMES = {
+    "passing": "passing yards", "rushing": "rushing yards",
+    "receiving": "receiving yards", "sacks": "sacks",
+    "ints": "interceptions", "tackles": "tackles",
+}
+
+
+def _franchise_owner_section(view, user_id, username):
+    """Stat section for a deep-linked user: their team, ranks, leaders, recent games.
+
+    team is the row the user picked on /franchise/link (never guessed).
+    Returns {"team": None} when they have not picked one.
+    """
+    section = {"username": username, "team": None}
+    if not view:
+        return section
+    team_id = str(_franchise_user_tokens().get("teams", {}).get(str(user_id), "") or "")
+    team_row, div_rank = None, 0
+    for _div, rows in view["divisions"]:
+        for i, r in enumerate(rows, 1):
+            if team_id and str(r.get("team_id", "")) == team_id:
+                team_row, div_rank = r, i
+                break
+        if team_row:
+            break
+    if not team_row:
+        return section
+    abbr = team_row.get("abbr", "")
+    stats = view.get("team_stats", [])
+
+    def rank_of(key, reverse=True):
+        mine = next((s for s in stats if s.get("abbr") == abbr), None)
+        if not mine:
+            return None
+        ordered = sorted((s.get(key) or 0 for s in stats), reverse=reverse)
+        try:
+            return ordered.index(mine.get(key) or 0) + 1
+        except ValueError:
+            return None
+
+    my_leaders = []
+    for cat, plist in (view.get("leaders") or {}).items():
+        for i, p in enumerate(plist or [], 1):
+            if p.get("team") == abbr:
+                my_leaders.append({
+                    "cat": _FRANCHISE_CAT_NAMES.get(cat, cat),
+                    "rank": i, "name": p.get("name", ""),
+                    "line": _franchise_leader_line(cat, p)})
+
+    recent = []
+    for wk in sorted(view.get("schedule", []), key=lambda w: w["week"], reverse=True):
+        for g in wk["games"]:
+            if not g.get("final"):
+                continue
+            if g["away"] == abbr or g["home"] == abbr:
+                if g["away"] == abbr:
+                    mine, theirs, opp, home = g["away_score"], g["home_score"], g["home"], False
+                else:
+                    mine, theirs, opp, home = g["home_score"], g["away_score"], g["away"], True
+                mine, theirs = mine or 0, theirs or 0
+                recent.append({
+                    "week": wk["week"], "opp": opp, "home": home,
+                    "score": "%s-%s" % (mine, theirs),
+                    "result": "W" if mine > theirs else ("T" if mine == theirs else "L")})
+                break
+        if len(recent) >= 3:
+            break
+
+    section.update({
+        "team": team_row, "div_rank": div_rank, "n_teams": len(stats),
+        "ranks": {
+            "off_yds": rank_of("off_yds", True),
+            "ppg": rank_of("ppg", True),
+            "def_yds": rank_of("def_yds", False),
+            "dppg": rank_of("dppg", False),
+            "to_diff": rank_of("to_diff", True)},
+        "my_leaders": my_leaders, "recent": recent})
+    return section
+
 async def _franchise_profile_summary(db, user_id):
     """Compact franchise summary for a profile card.
 
@@ -983,6 +1129,7 @@ async def _franchise_profile_summary(db, user_id):
         "team": team,
         "week_label": view.get("week_label", "") if view else "",
         "current_week": view.get("current_week", 0) if view else 0,
+        "age": _franchise_age_label(_franchise_user_latest_ts(user_id, leagues, default_owner_id)),
     }
 
 
@@ -1234,6 +1381,97 @@ def _franchise_league_view(league_id: str):
     }
 
 
+FRANCHISE_GROUP_DESC_PREFIX = "[franchise-league:"
+FRANCHISE_GROUP_NAME_FMT = "Madden Franchise League %s"
+
+
+async def _franchise_sync_league_groups(db):
+    """Auto-group: one BudzBook group per league with 2+ linked users.
+
+    Reuses the existing groups/group_members tables. Groups are owned by
+    the @jarvis system user, named after the league, and membership is
+    synced (added/removed) on every franchise hub visit. A same-named
+    group created by a human is never hijacked.
+    """
+    leagues = _franchise_leagues()
+    if not leagues:
+        return
+    default_owner_id = await _franchise_default_owner_id(db)
+    league_users = {}
+    for lid, info in leagues.items():
+        uids = set(info.get("owner_user_ids", []))
+        if lid == FRANCHISE_DEFAULT_LEAGUE and default_owner_id is not None:
+            uids.add(default_owner_id)
+        if len(uids) >= 2:
+            league_users[lid] = sorted(uids)
+    if not league_users:
+        return
+    cur = await db.execute("SELECT id FROM users WHERE username = 'jarvis' LIMIT 1")
+    jrow = await cur.fetchone()
+    if not jrow:
+        return
+    for lid, uids in league_users.items():
+        name = FRANCHISE_GROUP_NAME_FMT % lid
+        desc = ("%s%s] Auto-group for Madden franchise league %s. Members are "
+                "BudzBook users who linked this league's exports."
+                % (FRANCHISE_GROUP_DESC_PREFIX, lid, lid))
+        cur = await db.execute("SELECT id, description FROM groups WHERE name = ?", (name,))
+        grow = await cur.fetchone()
+        if grow and str(grow["description"] or "").startswith(FRANCHISE_GROUP_DESC_PREFIX):
+            gid = grow["id"]
+        elif grow:
+            continue  # name taken by a human-made group; leave it alone
+        else:
+            cur = await db.execute(
+                "INSERT INTO groups (name, description, owner_id, created_at)"
+                " VALUES (?, ?, ?, ?)",
+                (name, desc, jrow["id"], _now()))
+            gid = cur.lastrowid
+        for uid in uids:
+            await db.execute(
+                "INSERT OR IGNORE INTO group_members (group_id, user_id, joined_at)"
+                " VALUES (?, ?, ?)", (gid, uid, _now()))
+        await db.execute(
+            "DELETE FROM group_members WHERE group_id = ? AND user_id NOT IN (%s)"
+            % ",".join("?" * len(uids)), (gid, *uids))
+    await db.commit()
+
+
+async def _franchise_group_roster(db, group):
+    """Member roster for an auto franchise group: team + record per member.
+
+    Returns None for non-franchise groups (group.html ignores it).
+    """
+    desc = str(group.get("description") or "")
+    if not desc.startswith(FRANCHISE_GROUP_DESC_PREFIX):
+        return None
+    lid = desc[len(FRANCHISE_GROUP_DESC_PREFIX):].split("]", 1)[0].strip()
+    view = _franchise_league_view(lid)
+    if not view:
+        return None
+    tokens = _franchise_user_tokens()
+    cur = await db.execute(
+        "SELECT u.id, u.username, u.display_name FROM group_members m "
+        "JOIN users u ON u.id = m.user_id WHERE m.group_id = ? ORDER BY u.username",
+        (group["id"],))
+    members = []
+    for row in await cur.fetchall():
+        team = None
+        team_id = str(tokens.get("teams", {}).get(str(row["id"]), "") or "")
+        if team_id:
+            for _div, rows in view["divisions"]:
+                for r in rows:
+                    if str(r.get("team_id", "")) == team_id:
+                        team = r
+                        break
+                if team:
+                    break
+        members.append({
+            "username": row["username"],
+            "display_name": row["display_name"] or row["username"],
+            "team": team})
+    return {"league_id": lid, "members": members}
+
 @app.get("/franchise")
 async def franchise_hub(request: Request, league: str = "", u: str = "",
                         user=Depends(current_user), db=Depends(get_db)):
@@ -1254,12 +1492,14 @@ async def franchise_hub(request: Request, league: str = "", u: str = "",
             owner_names[row["id"]] = row["username"]
     lid = ""
     owner_label = ""
+    owner_uid = None
+    default_owner_id = await _franchise_default_owner_id(db)
     if u:
         cur = await db.execute(
             "SELECT id, username, display_name FROM users WHERE username = ?", (u,))
         prow = await cur.fetchone()
         if prow:
-            default_owner_id = await _franchise_default_owner_id(db)
+            owner_uid = prow["id"]
             pmine = _franchise_linked_league_ids(prow["id"], leagues, default_owner_id)
             if pmine:
                 lid = pmine[0]
@@ -1275,17 +1515,29 @@ async def franchise_hub(request: Request, league: str = "", u: str = "",
     if not lid and leagues:
         lid = max(leagues, key=lambda l: leagues[l]["latest_ts"])
     view = _franchise_league_view(lid) if lid else None
+    await _franchise_sync_league_groups(db)
     league_list = [{
         "id": l,
         "latest_ts": info["latest_ts"],
+        "age": _franchise_age_label(info["latest_ts"]),
         "owners": [owner_names.get(uid2, "user %s" % uid2) for uid2 in info["owner_user_ids"]]
                   or ["Brad (original link)"],
     } for l, info in sorted(leagues.items(),
                             key=lambda kv: kv[1]["latest_ts"], reverse=True)]
+    freshness = _franchise_age_label(view["batch_ts"]) if view else ""
+    stale_days = _franchise_days_since(view["batch_ts"]) if view else None
+    owner_section = (_franchise_owner_section(view, owner_uid, owner_label)
+                     if owner_uid and lid else None)
+    owner_abbr = (owner_section.get("team") or {}).get("abbr", "") if owner_section else ""
+    owner_freshness = (_franchise_age_label(
+        _franchise_user_latest_ts(owner_uid, leagues, default_owner_id))
+        if owner_uid else "")
     return templates.TemplateResponse(request, "franchise.html", {
         "user": user, "leagues": league_list, "league_id": lid, "view": view,
         "msg": request.query_params.get("msg", ""),
-        "owner_label": owner_label,
+        "owner_label": owner_label, "owner_section": owner_section,
+        "owner_abbr": owner_abbr, "owner_freshness": owner_freshness,
+        "freshness": freshness, "stale": stale_days is not None and stale_days > 7,
     })
 
 
@@ -2745,9 +2997,11 @@ async def group_page(request: Request, gid: int, db=Depends(get_db),
     posts = await _post_rows(db, user["id"], "WHERE p.group_id = ?", (gid,),
                              FEED_PAGE_SIZE + 1, offset)
     has_more = len(posts) > FEED_PAGE_SIZE
+    franchise_roster = await _franchise_group_roster(db, group)
     return templates.TemplateResponse(request, "group.html",
         {"user": user, "group": group, "posts": posts[:FEED_PAGE_SIZE],
-         "page": page, "has_more": has_more, "msg": msg})
+         "page": page, "has_more": has_more, "msg": msg,
+         "franchise_roster": franchise_roster})
 
 
 @app.post("/groups/{gid}/join")
