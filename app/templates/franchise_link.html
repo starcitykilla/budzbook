@@ -28,4 +28,20 @@
   <li>Export your franchise from the app — your league appears on the hub within a minute or two.</li>
 </ol>
 </div>
+<div class="card">
+<h4>Your team</h4>
+{% if teams %}
+<p class="muted">Pick the team you coach so your profile shows your team and record.</p>
+<form method="post" action="/franchise/link">
+  <select name="team_id" aria-label="Your team">
+    {% for t in teams %}
+    <option value="{{ t.team_id }}"{% if t.team_id == my_team %} selected{% endif %}>{{ t.label }}</option>
+    {% endfor %}
+  </select>
+  <button class="btn" type="submit">Save my team</button>
+</form>
+{% else %}
+<p class="muted">Your team list appears here once franchise exports are on the hub.</p>
+{% endif %}
+</div>
 {% endblock %}

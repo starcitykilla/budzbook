@@ -893,7 +893,7 @@ def _league_id_from_subpath(subpath: str) -> str:
 
 
 def _franchise_user_tokens() -> dict:
-    data = {"by_token": {}, "by_user": {}}
+    data = {"by_token": {}, "by_user": {}, "teams": {}}
     try:
         if os.path.exists(FRANCHISE_USER_TOKENS_FILE):
             with open(FRANCHISE_USER_TOKENS_FILE) as f:
@@ -901,6 +901,7 @@ def _franchise_user_tokens() -> dict:
             if isinstance(raw, dict):
                 data["by_token"] = {str(k): v for k, v in (raw.get("by_token") or {}).items()}
                 data["by_user"] = {str(k): v for k, v in (raw.get("by_user") or {}).items()}
+                data["teams"] = {str(k): str(v) for k, v in (raw.get("teams") or {}).items()}
     except Exception:
         pass
     return data
@@ -920,6 +921,95 @@ def _user_for_franchise_token(token: str):
     if not token:
         return None
     return _franchise_user_tokens()["by_token"].get(token)
+
+
+async def _franchise_default_owner_id(db):
+    """User id that owns the original league (FRANCHISE_DEFAULT_LEAGUE).
+
+    Its exports arrive through the global token with no per-user
+    attribution, so profile display maps it back to its owner here.
+    """
+    try:
+        cur = await db.execute(
+            "SELECT id FROM users WHERE username = 'Krzybudz' LIMIT 1")
+        row = await cur.fetchone()
+        return row["id"] if row else None
+    except Exception:
+        return None
+
+
+def _franchise_linked_league_ids(user_id, leagues, default_owner_id=None):
+    """League ids with exports owned by this user, newest first.
+
+    The original league is included for its owner even though its exports
+    carry no per-user token.
+    """
+    mine = [lid for lid, info in leagues.items()
+            if user_id in info.get("owner_user_ids", [])]
+    if (FRANCHISE_DEFAULT_LEAGUE in leagues and default_owner_id is not None
+            and user_id == default_owner_id
+            and FRANCHISE_DEFAULT_LEAGUE not in mine):
+        mine.append(FRANCHISE_DEFAULT_LEAGUE)
+    mine.sort(key=lambda l: leagues[l]["latest_ts"], reverse=True)
+    return mine
+
+
+async def _franchise_profile_summary(db, user_id):
+    """Compact franchise summary for a profile card.
+
+    Returns {league_id, team, week_label, current_week} for the user's most
+    recently updated league, or None when they have no franchise data.
+    'team' is the row the user picked on /franchise/link, or None.
+    """
+    leagues = _franchise_leagues()
+    default_owner_id = await _franchise_default_owner_id(db)
+    mine = _franchise_linked_league_ids(user_id, leagues, default_owner_id)
+    if not mine:
+        return None
+    lid = mine[0]
+    view = _franchise_league_view(lid)
+    team = None
+    team_id = _franchise_user_tokens().get("teams", {}).get(str(user_id), "")
+    if view and team_id:
+        for _div, rows in view["divisions"]:
+            for r in rows:
+                if str(r.get("team_id", "")) == str(team_id):
+                    team = r
+                    break
+            if team:
+                break
+    return {
+        "league_id": lid,
+        "team": team,
+        "week_label": view.get("week_label", "") if view else "",
+        "current_week": view.get("current_week", 0) if view else 0,
+    }
+
+
+def _franchise_team_choices(user_id):
+    """Dropdown choices for the 'which team do you coach' picker."""
+    leagues = _franchise_leagues()
+    mine = [lid for lid, info in leagues.items()
+            if user_id in info.get("owner_user_ids", [])]
+    if FRANCHISE_DEFAULT_LEAGUE in leagues and FRANCHISE_DEFAULT_LEAGUE not in mine:
+        # The original league's teams are a valid starting list too.
+        mine.append(FRANCHISE_DEFAULT_LEAGUE)
+    choices = []
+    for lid in sorted(mine, key=lambda l: leagues[l]["latest_ts"], reverse=True):
+        view = _franchise_league_view(lid)
+        if not view:
+            continue
+        for _div, rows in view["divisions"]:
+            for r in rows:
+                label = "%s %s (%s)" % (r.get("city", ""), r.get("nick", ""),
+                                        r.get("abbr", ""))
+                if r.get("coach"):
+                    label += " — coach " + r["coach"]
+                choices.append({"team_id": str(r.get("team_id", "")),
+                                "label": label.strip()})
+        break  # only the newest league's teams
+    choices.sort(key=lambda c: c["label"])
+    return choices
 
 
 def _franchise_public_url(request: Request, token: str) -> str:
@@ -1036,6 +1126,7 @@ def _franchise_league_view(league_id: str):
         t = teams.get(tid, {})
         div = s.get("divisionName") or t.get("div") or "Other"
         divisions.setdefault(div, []).append({
+            "team_id": tid,
             "abbr": t.get("abbr") or s.get("teamName") or "",
             "city": t.get("city", ""), "nick": t.get("nick", ""),
             "coach": t.get("coach", ""),
@@ -1144,12 +1235,17 @@ def _franchise_league_view(league_id: str):
 
 
 @app.get("/franchise")
-async def franchise_hub(request: Request, league: str = "",
+async def franchise_hub(request: Request, league: str = "", u: str = "",
                         user=Depends(current_user), db=Depends(get_db)):
-    """Public league hub: standings, schedule, team stats, stat leaders."""
+    """Public league hub: standings, schedule, team stats, stat leaders.
+
+    ?u=<username> deep-links to THAT user's franchise (resolved server-side
+    from the profile owner's user id, never the viewer's) — used by the
+    franchise button on profile pages.
+    """
     leagues = _franchise_leagues()
     owner_names = {}
-    uids = sorted({u for info in leagues.values() for u in info["owner_user_ids"]})
+    uids = sorted({uid for info in leagues.values() for uid in info["owner_user_ids"]})
     if uids:
         cur = await db.execute(
             "SELECT id, username FROM users WHERE id IN (%s)" % ",".join("?" * len(uids)),
@@ -1157,9 +1253,20 @@ async def franchise_hub(request: Request, league: str = "",
         for row in await cur.fetchall():
             owner_names[row["id"]] = row["username"]
     lid = ""
-    if league and league in leagues:
+    owner_label = ""
+    if u:
+        cur = await db.execute(
+            "SELECT id, username, display_name FROM users WHERE username = ?", (u,))
+        prow = await cur.fetchone()
+        if prow:
+            default_owner_id = await _franchise_default_owner_id(db)
+            pmine = _franchise_linked_league_ids(prow["id"], leagues, default_owner_id)
+            if pmine:
+                lid = pmine[0]
+                owner_label = prow["display_name"] or prow["username"]
+    if not lid and league and league in leagues:
         lid = league
-    elif user is not None:
+    if not lid and user is not None:
         mine = [l for l, info in leagues.items() if user["id"] in info["owner_user_ids"]]
         if mine:
             lid = max(mine, key=lambda l: leagues[l]["latest_ts"])
@@ -1171,37 +1278,47 @@ async def franchise_hub(request: Request, league: str = "",
     league_list = [{
         "id": l,
         "latest_ts": info["latest_ts"],
-        "owners": [owner_names.get(u, "user %s" % u) for u in info["owner_user_ids"]]
+        "owners": [owner_names.get(uid2, "user %s" % uid2) for uid2 in info["owner_user_ids"]]
                   or ["Brad (original link)"],
     } for l, info in sorted(leagues.items(),
                             key=lambda kv: kv[1]["latest_ts"], reverse=True)]
     return templates.TemplateResponse(request, "franchise.html", {
         "user": user, "leagues": league_list, "league_id": lid, "view": view,
         "msg": request.query_params.get("msg", ""),
+        "owner_label": owner_label,
     })
 
 
 @app.get("/franchise/link")
-async def franchise_link(request: Request, user=Depends(current_user)):
+async def franchise_link(request: Request, user=Depends(current_user),
+                         db=Depends(get_db)):
     """Mint (or show) this user's personal Madden export URL."""
     redir = login_required(user)
     if redir:
         return redir
     tok = _token_for_user(user["id"])
+    teams = _franchise_team_choices(user["id"])
+    my_team = _franchise_user_tokens().get("teams", {}).get(str(user["id"]), "")
     return templates.TemplateResponse(request, "franchise_link.html", {
         "user": user, "token": tok,
         "export_url": _franchise_public_url(request, tok) if tok else "",
         "msg": request.query_params.get("msg", ""),
+        "teams": teams, "my_team": str(my_team),
     })
 
 
 @app.post("/franchise/link")
 async def franchise_link_create(request: Request, user=Depends(current_user),
-                                regenerate: str = Form("")):
+                                regenerate: str = Form(""),
+                                team_id: str = Form("")):
     redir = login_required(user)
     if redir:
         return redir
     data = _franchise_user_tokens()
+    if team_id:
+        data.setdefault("teams", {})[str(user["id"])] = team_id.strip()
+        _save_franchise_user_tokens(data)
+        return RedirectResponse("/franchise/link?msg=Team+saved", status_code=303)
     old = data["by_user"].get(str(user["id"]), "")
     if old and not regenerate:
         return RedirectResponse("/franchise/link?msg=Already+linked", status_code=303)
@@ -1895,7 +2012,9 @@ async def profile(request: Request, username: str, db=Depends(get_db),
                                           status_code=404)
     profile, posts = ctx
     gear = await currency.equipped_gear(db, profile["id"])
-    return templates.TemplateResponse(request, "profile.html", { "user": user, "profile": profile, "posts": posts, "msg": msg, "gear": gear})
+    franchise = await _franchise_profile_summary(db, profile["id"])
+    franchise_linkable = bool(user and user["id"] == profile["id"])
+    return templates.TemplateResponse(request, "profile.html", { "user": user, "profile": profile, "posts": posts, "msg": msg, "gear": gear, "franchise": franchise, "franchise_linkable": franchise_linkable})
 
 
 @app.get("/u/{username}/followers")

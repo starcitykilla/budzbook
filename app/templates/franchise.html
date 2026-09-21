@@ -2,6 +2,7 @@
 {% block title %}Franchise Hub — BudzBook{% endblock %}
 {% block content %}
 <h2>🏈 Franchise Hub</h2>
+{% if owner_label %}<p class="muted">Showing {{ owner_label }}'s franchise</p>{% endif %}
 <div class="cta-row" style="margin-bottom:12px">
   {% if leagues|length > 1 %}
   <form method="get" action="/franchise" style="display:inline">
