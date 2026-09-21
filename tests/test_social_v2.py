@@ -158,6 +158,63 @@ def test_golive_dedupe_table():
     assert n == 1 and pid == 1
 
 
+# ---- comment attachments (photo + video) ----
+def _make_post(author, body="post for comments"):
+    _register(author)
+    _login(author)
+    r = client.post("/post", data={"body": body})
+    assert r.status_code in (200, 303), (author, r.status_code)
+    async def _pid():
+        db = await aiosqlite.connect(DB_PATH)
+        cur = await db.execute("SELECT id FROM posts ORDER BY id DESC LIMIT 1")
+        pid = (await cur.fetchone())[0]
+        await db.close()
+        return pid
+    return asyncio.run(_pid())
+
+
+def test_comment_image_upload_renders():
+    pid = _make_post("commenter1")
+    fake_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+    r = client.post(f"/post/{pid}/comment", data={"body": "look at this"},
+                    files={"image": ("pic.png", io.BytesIO(fake_png), "image/png")})
+    assert r.status_code in (200, 303)
+    # migration added the columns
+    async def _cols():
+        db = await aiosqlite.connect(DB_PATH)
+        cur = await db.execute("PRAGMA table_info(comments)")
+        cols = [row[1] for row in await cur.fetchall()]
+        await db.close()
+        return cols
+    cols = asyncio.run(_cols())
+    assert "image_path" in cols and "video_path" in cols
+    r = client.get("/feed")
+    assert r.status_code == 200
+    assert "look at this" in r.text
+    assert "comment-img" in r.text and "/media/comments/" in r.text
+
+
+def test_comment_video_upload_renders():
+    pid = _make_post("commenter2")
+    fake_mp4 = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 100
+    r = client.post(f"/post/{pid}/comment", data={"body": ""},
+                    files={"video": ("clip.mp4", io.BytesIO(fake_mp4), "video/mp4")})
+    assert r.status_code in (200, 303)
+    r = client.get("/feed")
+    assert r.status_code == 200
+    assert "comment-video" in r.text and "/media/comments/" in r.text
+
+
+def test_comment_image_rejected_bad_ext():
+    pid = _make_post("commenter3")
+    r = client.post(f"/post/{pid}/comment", data={"body": "evil attempt"},
+                    files={"image": ("evil.exe", io.BytesIO(b"nope"), "application/octet-stream")})
+    assert r.status_code in (200, 303)
+    r = client.get("/feed")
+    assert r.status_code == 200
+    assert "evil.exe" not in r.text
+
+
 # ---- nav + pages render ----
 def test_new_pages_render():
     _login("tagger")

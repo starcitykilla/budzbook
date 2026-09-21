@@ -7,6 +7,7 @@ Route map (kept in one file on purpose so it's easy to read top to bottom):
   Public:      /  /register  /login  /logout  /age-check  /terms
                /manifest.webmanifest  (PWA install manifest)
                /api/stream/avatars  /api/stream/avatar/<username>   (stream-PC sync)
+               /api/franchise/export/<token>  (Madden companion-app league exports)
   Social:      /feed  /post  /post/<id>/like  /post/<id>/comment  /react
                /post/<id>/delete  /post/<id>/report
                /u/<username>  /u/<username>/followers|following
@@ -19,6 +20,7 @@ Age gate: everything except /age-check, /static, /media and /api/stream/*
 requires a signed 21+ cookie (see the age_gate middleware below).
 """
 import base64
+import glob
 import json
 import math
 import os
@@ -265,8 +267,9 @@ async def terms_gate(request: Request, call_next):
 # --------------------------------------------------------------------------
 def _age_exempt(path: str) -> bool:
     return (
-        path in ("/age-check", "/manifest.webmanifest", "/ticker", "/ticker.json", "/livelook", "/livelook.json")
-        or path.startswith(("/static/", "/media/", "/api/stream/"))
+        path in ("/age-check", "/manifest.webmanifest", "/ticker", "/ticker.json", "/livelook", "/livelook.json",
+                 "/franchise")
+        or path.startswith(("/static/", "/media/", "/api/stream/", "/api/franchise/"))
     )
 
 
@@ -779,6 +782,436 @@ async def stream_avatar(username: str, db=Depends(get_db)):
     if not row or not row["avatar_approved"] or not avatar_exists(username):
         return JSONResponse({"error": "no approved avatar"}, status_code=404)
     return FileResponse(avatar_path_for(username), media_type="image/jpeg")
+
+
+# --------------------------------------------------------------------------
+# Franchise league exports (Madden companion app)
+# --------------------------------------------------------------------------
+# The companion app POSTs league data to the Web URL the user types in, but
+# it appends EA-style subpaths (ps5/<league>/standings,
+# ps5/<league>/week/reg/<n>/<category>, ...) to that base URL -- so the
+# receiver must accept any subpath, not just the bare base. The app cannot
+# send cookies, so everything lives under /api/franchise/ (age-gate exempt)
+# and is guarded by an unguessable per-install token in the URL path. Raw
+# payloads are stored on disk for inspection/parsing.
+FRANCHISE_EXPORT_DIR = os.path.join(BASE_DIR, "franchise_exports")
+FRANCHISE_TOKEN_FILE = os.path.join(BASE_DIR, "franchise_export_token.txt")
+
+
+def _franchise_token() -> str:
+    if os.path.exists(FRANCHISE_TOKEN_FILE):
+        with open(FRANCHISE_TOKEN_FILE) as f:
+            tok = f.read().strip()
+            if tok:
+                return tok
+    tok = secrets.token_urlsafe(24)
+    with open(FRANCHISE_TOKEN_FILE, "w") as f:
+        f.write(tok)
+    return tok
+
+
+async def _store_franchise_payload(token: str, subpath: str, request: Request):
+    """Validate the token (global or per-user) and stash the raw body on disk.
+
+    The original global token keeps working exactly as before (owner None).
+    Per-user tokens minted at /franchise/link attribute payloads to that user.
+    """
+    owner_user_id = None  # None = the original global token
+    if not secrets.compare_digest(token or "", _franchise_token()):
+        owner_user_id = _user_for_franchise_token(token or "")
+        if owner_user_id is None:
+            return JSONResponse({"ok": False, "error": "bad token"}, status_code=403)
+    body = await request.body()
+    os.makedirs(FRANCHISE_EXPORT_DIR, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", subpath or "root")[:120] or "root"
+    fname = "%s_%s_%s" % (ts, safe, uuid.uuid4().hex[:8])
+    with open(os.path.join(FRANCHISE_EXPORT_DIR, fname + ".bin"), "wb") as f:
+        f.write(body)
+    with open(os.path.join(FRANCHISE_EXPORT_DIR, fname + ".meta.json"), "w") as f:
+        json.dump({
+            "received_at": ts,
+            "subpath": subpath,
+            "league_id": _league_id_from_subpath(subpath),
+            "owner_user_id": owner_user_id,
+            "content_type": request.headers.get("content-type", ""),
+            "content_length": len(body),
+            "client": request.client.host if request.client else "",
+            "query": dict(request.query_params),
+        }, f, indent=2)
+    return {"ok": True, "received_bytes": len(body), "subpath": subpath}
+
+
+@app.post("/api/franchise/export/{token}")
+async def franchise_export(token: str, request: Request):
+    """Receiver for the Madden companion app's league exporter (bare URL)."""
+    return await _store_franchise_payload(token, "", request)
+
+
+@app.api_route("/api/franchise/export/{token}/{subpath:path}",
+               methods=["GET", "POST", "PUT", "PATCH"])
+async def franchise_export_path(token: str, subpath: str, request: Request):
+    """Wildcard receiver for the EA-style subpaths the app appends."""
+    return await _store_franchise_payload(token, subpath, request)
+
+
+# --------------------------------------------------------------------------
+# Franchise league hub + per-user franchise linking
+# --------------------------------------------------------------------------
+# Users link their own Madden franchise from /franchise/link: the page mints
+# a unique export URL per user, which they paste into the Madden companion
+# app's export settings. Payloads are attributed to the token owner in the
+# .meta.json (owner_user_id + league_id, backfilled from the subpath for old
+# files), and /franchise renders standings, schedule, team stats, and stat
+# leaders from the export batches of the selected league. Brad's league
+# (FRANCHISE_DEFAULT_LEAGUE) is the default view.
+FRANCHISE_USER_TOKENS_FILE = os.path.join(BASE_DIR, "franchise_user_tokens.json")
+FRANCHISE_DEFAULT_LEAGUE = "1974224"  # Brad's franchise
+
+DIVISION_ORDER = ["AFC East", "AFC North", "AFC South", "AFC West",
+                  "NFC East", "NFC North", "NFC South", "NFC West"]
+
+_FRANCHISE_LIST_KEYS = {
+    "standings": "teamStandingInfoList",
+    "leagueteams": "leagueTeamInfoList",
+    "passing": "playerPassingStatInfoList",
+    "rushing": "playerRushingStatInfoList",
+    "receiving": "playerReceivingStatInfoList",
+    "defense": "playerDefensiveStatInfoList",
+    "team": "teamStatInfoList",
+    "schedules": "gameScheduleInfoList",
+}
+
+
+def _league_id_from_subpath(subpath: str) -> str:
+    sub = "/" + (subpath or "")
+    m = re.search(r"/(?:ps5|ps4|xbsx|xboxone|pc)/(\d+)/", sub)
+    if m:
+        return m.group(1)
+    m = re.search(r"(\d{5,})", subpath or "")
+    return m.group(1) if m else ""
+
+
+def _franchise_user_tokens() -> dict:
+    data = {"by_token": {}, "by_user": {}}
+    try:
+        if os.path.exists(FRANCHISE_USER_TOKENS_FILE):
+            with open(FRANCHISE_USER_TOKENS_FILE) as f:
+                raw = json.load(f)
+            if isinstance(raw, dict):
+                data["by_token"] = {str(k): v for k, v in (raw.get("by_token") or {}).items()}
+                data["by_user"] = {str(k): v for k, v in (raw.get("by_user") or {}).items()}
+    except Exception:
+        pass
+    return data
+
+
+def _save_franchise_user_tokens(data: dict) -> None:
+    with open(FRANCHISE_USER_TOKENS_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def _token_for_user(user_id) -> str:
+    return _franchise_user_tokens()["by_user"].get(str(user_id), "")
+
+
+def _user_for_franchise_token(token: str):
+    """Return the owning user id for a per-user token, or None."""
+    if not token:
+        return None
+    return _franchise_user_tokens()["by_token"].get(token)
+
+
+def _franchise_public_url(request: Request, token: str) -> str:
+    host = (request.url.hostname or "").lower()
+    base = "https://budzbook.us" if "budzbook.us" in host else str(request.base_url).rstrip("/")
+    return base + "/api/franchise/export/" + token
+
+
+def _franchise_key_for_subpath(subpath: str):
+    if subpath.endswith("/standings"):
+        return "standings"
+    if subpath.endswith("/leagueteams"):
+        return "leagueteams"
+    if "/week/" in subpath:
+        return subpath.rsplit("/", 1)[-1]
+    return None
+
+
+def _franchise_meta_rows():
+    """All export metas, with league_id / owner_user_id backfilled for old files."""
+    rows = []
+    if not os.path.isdir(FRANCHISE_EXPORT_DIR):
+        return rows
+    for m in glob.glob(os.path.join(FRANCHISE_EXPORT_DIR, "*.meta.json")):
+        try:
+            meta = json.load(open(m, encoding="utf-8"))
+        except Exception:
+            continue
+        bin_path = m[: -len(".meta.json")] + ".bin"
+        if not os.path.exists(bin_path):
+            continue
+        sub = meta.get("subpath", "") or ""
+        rows.append({
+            "league_id": meta.get("league_id") or _league_id_from_subpath(sub) or "unknown",
+            "batch_ts": meta.get("received_at") or os.path.basename(m).split("_")[0],
+            "subpath": sub,
+            "bin": bin_path,
+            "owner_user_id": meta.get("owner_user_id"),
+        })
+    return rows
+
+
+def _franchise_leagues():
+    """league_id -> {latest_ts, owner_user_ids:[...], batch_count}."""
+    leagues = {}
+    for r in _franchise_meta_rows():
+        lid = r["league_id"]
+        info = leagues.setdefault(
+            lid, {"latest_ts": "", "owner_user_ids": set(), "batch_count": 0})
+        if r["batch_ts"] > info["latest_ts"]:
+            info["latest_ts"] = r["batch_ts"]
+        if r["owner_user_id"] is not None:
+            info["owner_user_ids"].add(r["owner_user_id"])
+        info["batch_count"] += 1
+    for info in leagues.values():
+        info["owner_user_ids"] = sorted(info["owner_user_ids"])
+    return leagues
+
+
+def _franchise_load_list(rows, key):
+    """Merge every payload of one category across rows (deduped by scheduleId)."""
+    out, seen = [], set()
+    for r in rows:
+        if _franchise_key_for_subpath(r["subpath"]) != key:
+            continue
+        try:
+            lst = json.load(open(r["bin"], encoding="utf-8")).get(
+                _FRANCHISE_LIST_KEYS[key], [])
+        except Exception:
+            continue
+        for item in lst:
+            dedup = item.get("scheduleId", id(item))
+            if dedup in seen:
+                continue
+            seen.add(dedup)
+            out.append(item)
+    return out
+
+
+def _franchise_league_view(league_id: str):
+    """Render-ready dict for one league, or None when no exports exist."""
+    rows = [r for r in _franchise_meta_rows() if r["league_id"] == league_id]
+    if not rows:
+        return None
+    latest_ts = max(r["batch_ts"] for r in rows)
+    latest_rows = [r for r in rows if r["batch_ts"] == latest_ts]
+
+    latest = {}
+    for r in latest_rows:
+        key = _franchise_key_for_subpath(r["subpath"])
+        if not key or key in latest:
+            continue
+        try:
+            latest[key] = json.load(open(r["bin"], encoding="utf-8"))
+        except Exception:
+            continue
+
+    teams = {}
+    for t in latest.get("leagueteams", {}).get(_FRANCHISE_LIST_KEYS["leagueteams"], []):
+        teams[t.get("teamId")] = {
+            "abbr": t.get("abbrName") or "", "city": t.get("cityName") or "",
+            "nick": t.get("nickName") or t.get("displayName") or "",
+            "div": t.get("divName") or "", "ovr": t.get("ovrRating") or "",
+            "coach": t.get("userName") or "",
+        }
+
+    def team_label(tid):
+        return teams.get(tid, {}).get("abbr") or str(tid or "?")
+
+    # --- standings by division ---
+    divisions = {}
+    for s in latest.get("standings", {}).get(_FRANCHISE_LIST_KEYS["standings"], []):
+        tid = s.get("teamId")
+        t = teams.get(tid, {})
+        div = s.get("divisionName") or t.get("div") or "Other"
+        divisions.setdefault(div, []).append({
+            "abbr": t.get("abbr") or s.get("teamName") or "",
+            "city": t.get("city", ""), "nick": t.get("nick", ""),
+            "coach": t.get("coach", ""),
+            "w": s.get("totalWins", 0) or 0, "l": s.get("totalLosses", 0) or 0,
+            "t": s.get("totalTies", 0) or 0, "pct": s.get("winPct", 0) or 0,
+            "streak": s.get("winLossStreak") or "",
+            "pf": s.get("ptsFor", 0) or 0, "pa": s.get("ptsAgainst", 0) or 0,
+            "ovr": t.get("ovr", ""),
+        })
+    for div_rows in divisions.values():
+        div_rows.sort(key=lambda r: (-r["w"], -r["pct"], -((r["pf"] or 0) - (r["pa"] or 0))))
+    div_names = sorted(divisions,
+                       key=lambda d: DIVISION_ORDER.index(d) if d in DIVISION_ORDER else 99)
+
+    # --- schedule: merge all weekly schedule files, group by week ---
+    weeks = {}
+    for g in _franchise_load_list(rows, "schedules"):
+        wk = (g.get("weekIndex", 0) or 0) + 1
+        weeks.setdefault(wk, []).append(g)
+    schedule, last_final_week = [], 0
+    for wk in sorted(weeks):
+        games = []
+        for g in weeks[wk]:
+            final = g.get("status") == 2
+            games.append({
+                "away": team_label(g.get("awayTeamId")),
+                "home": team_label(g.get("homeTeamId")),
+                "away_score": g.get("awayScore"), "home_score": g.get("homeScore"),
+                "final": final,
+            })
+            if final and wk > last_final_week:
+                last_final_week = wk
+        games.sort(key=lambda g: (g["away"], g["home"]))
+        schedule.append({"week": wk, "games": games})
+    current_week = last_final_week + 1 if schedule else 0
+
+    # --- team stats (latest batch) ---
+    team_stats = []
+    for s in latest.get("team", {}).get(_FRANCHISE_LIST_KEYS["team"], []):
+        team_stats.append({
+            "abbr": team_label(s.get("teamId")),
+            "off_yds": s.get("offTotalYds", 0) or 0,
+            "off_pass": s.get("offPassYds", 0) or 0,
+            "off_rush": s.get("offRushYds", 0) or 0,
+            "ppg": round(s.get("offPtsPerGame", 0) or 0, 1),
+            "def_yds": s.get("defTotalYds", 0) or 0,
+            "dppg": round(s.get("defPtsPerGame", 0) or 0, 1),
+            "to_diff": s.get("tODiff", 0) or 0,
+        })
+    team_stats.sort(key=lambda r: -r["off_yds"])
+
+    # --- season stat leaders (weekly snapshots summed, deduped by roster+week) ---
+    def season_leaders(cat, list_key, sum_fields, top_field, n=5):
+        seen, agg = {}, {}
+        for r in rows:
+            if _franchise_key_for_subpath(r["subpath"]) != cat:
+                continue
+            try:
+                plist = json.load(open(r["bin"], encoding="utf-8")).get(list_key, [])
+            except Exception:
+                continue
+            for p in plist:
+                key = (p.get("rosterId"), p.get("weekIndex"))
+                if key in seen:
+                    continue
+                seen[key] = p
+        for (rid, _wk), p in seen.items():
+            a = agg.setdefault(rid, {"name": p.get("fullName") or "",
+                                     "team": team_label(p.get("teamId"))})
+            for f in sum_fields:
+                a[f] = (a.get(f) or 0) + (p.get(f) or 0)
+        return sorted(agg.values(), key=lambda a: -(a.get(top_field) or 0))[:n]
+
+    leaders = {
+        "passing": season_leaders("passing", _FRANCHISE_LIST_KEYS["passing"],
+                                  ["passYds", "passTDs", "passInts", "passAtt", "passComp"],
+                                  "passYds"),
+        "rushing": season_leaders("rushing", _FRANCHISE_LIST_KEYS["rushing"],
+                                  ["rushYds", "rushAtt", "rushTDs"], "rushYds"),
+        "receiving": season_leaders("receiving", _FRANCHISE_LIST_KEYS["receiving"],
+                                    ["recYds", "recCatches", "recTDs"], "recYds"),
+    }
+    defense = season_leaders("defense", _FRANCHISE_LIST_KEYS["defense"],
+                             ["defSacks", "defInts", "defTotalTackles"], "defSacks")
+    leaders["sacks"] = sorted(defense, key=lambda a: -(a.get("defSacks") or 0))[:5]
+    leaders["ints"] = sorted(defense, key=lambda a: -(a.get("defInts") or 0))[:5]
+    leaders["tackles"] = sorted(defense, key=lambda a: -(a.get("defTotalTackles") or 0))[:5]
+
+    week_label = ""
+    for r in latest_rows:
+        m = re.search(r"/week/(?:reg|pre|post)/(\d+)/", "/" + r["subpath"])
+        if m:
+            week_label = "Week %d" % (int(m.group(1)) + 1)
+            break
+
+    return {
+        "league_id": league_id,
+        "batch_ts": latest_ts,
+        "week_label": week_label,
+        "current_week": current_week,
+        "divisions": [(d, divisions[d]) for d in div_names],
+        "schedule": schedule,
+        "team_stats": team_stats,
+        "leaders": leaders,
+    }
+
+
+@app.get("/franchise")
+async def franchise_hub(request: Request, league: str = "",
+                        user=Depends(current_user), db=Depends(get_db)):
+    """Public league hub: standings, schedule, team stats, stat leaders."""
+    leagues = _franchise_leagues()
+    owner_names = {}
+    uids = sorted({u for info in leagues.values() for u in info["owner_user_ids"]})
+    if uids:
+        cur = await db.execute(
+            "SELECT id, username FROM users WHERE id IN (%s)" % ",".join("?" * len(uids)),
+            tuple(uids))
+        for row in await cur.fetchall():
+            owner_names[row["id"]] = row["username"]
+    lid = ""
+    if league and league in leagues:
+        lid = league
+    elif user is not None:
+        mine = [l for l, info in leagues.items() if user["id"] in info["owner_user_ids"]]
+        if mine:
+            lid = max(mine, key=lambda l: leagues[l]["latest_ts"])
+    if not lid and FRANCHISE_DEFAULT_LEAGUE in leagues:
+        lid = FRANCHISE_DEFAULT_LEAGUE
+    if not lid and leagues:
+        lid = max(leagues, key=lambda l: leagues[l]["latest_ts"])
+    view = _franchise_league_view(lid) if lid else None
+    league_list = [{
+        "id": l,
+        "latest_ts": info["latest_ts"],
+        "owners": [owner_names.get(u, "user %s" % u) for u in info["owner_user_ids"]]
+                  or ["Brad (original link)"],
+    } for l, info in sorted(leagues.items(),
+                            key=lambda kv: kv[1]["latest_ts"], reverse=True)]
+    return templates.TemplateResponse(request, "franchise.html", {
+        "user": user, "leagues": league_list, "league_id": lid, "view": view,
+        "msg": request.query_params.get("msg", ""),
+    })
+
+
+@app.get("/franchise/link")
+async def franchise_link(request: Request, user=Depends(current_user)):
+    """Mint (or show) this user's personal Madden export URL."""
+    redir = login_required(user)
+    if redir:
+        return redir
+    tok = _token_for_user(user["id"])
+    return templates.TemplateResponse(request, "franchise_link.html", {
+        "user": user, "token": tok,
+        "export_url": _franchise_public_url(request, tok) if tok else "",
+        "msg": request.query_params.get("msg", ""),
+    })
+
+
+@app.post("/franchise/link")
+async def franchise_link_create(request: Request, user=Depends(current_user),
+                                regenerate: str = Form("")):
+    redir = login_required(user)
+    if redir:
+        return redir
+    data = _franchise_user_tokens()
+    old = data["by_user"].get(str(user["id"]), "")
+    if old and not regenerate:
+        return RedirectResponse("/franchise/link?msg=Already+linked", status_code=303)
+    if old:
+        data["by_token"].pop(old, None)
+    tok = secrets.token_urlsafe(32)
+    data["by_token"][tok] = user["id"]
+    data["by_user"][str(user["id"])] = tok
+    _save_franchise_user_tokens(data)
+    return RedirectResponse("/franchise/link?msg=Export+URL+created", status_code=303)
 
 
 # --------------------------------------------------------------------------

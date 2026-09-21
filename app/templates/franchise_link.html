@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Link your Madden franchise — BudzBook{% endblock %}
+{% block content %}
+<h2>🔗 Link your Madden franchise</h2>
+{% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+<div class="card">
+{% if token %}
+<p>Your personal export URL is ready. Paste it into the Madden companion app's export settings and your league will show up on the <a href="/franchise">franchise hub</a> after the next export.</p>
+<p><input type="text" readonly value="{{ export_url }}" onclick="this.select()" style="width:100%;max-width:560px" aria-label="Your export URL"></p>
+<p class="muted">Keep this URL private — anyone with it can push data into your league slot.</p>
+<form method="post" action="/franchise/link">
+  <input type="hidden" name="regenerate" value="1">
+  <button class="btn" type="submit">Regenerate URL</button>
+</form>
+{% else %}
+<p>Get your league's standings, schedules, and stat leaders on the BudzBook <a href="/franchise">franchise hub</a>. Click below to generate your own private export URL, then paste it into the Madden companion app's export settings.</p>
+<form method="post" action="/franchise/link">
+  <button class="btn" type="submit">Generate my export URL</button>
+</form>
+{% endif %}
+</div>
+<div class="card">
+<h4>Setup steps</h4>
+<ol>
+  <li>Generate your export URL above.</li>
+  <li>Open the Madden companion app and find its export / web URL setting.</li>
+  <li>Paste your URL there and save.</li>
+  <li>Export your franchise from the app — your league appears on the hub within a minute or two.</li>
+</ol>
+</div>
+{% endblock %}

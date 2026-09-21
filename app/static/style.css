@@ -608,7 +608,6 @@ button[type="submit"]:disabled, input[type="submit"]:disabled {
 .creact { display: flex; gap: 6px; align-items: center; margin-top: 4px; flex-wrap: wrap; }
 .creact .react-open { font-size: 13px; padding: 2px 9px; }
 
-
 /* budzHoldReact CSS: suppress iOS text callout/selection on hold zones;
    hold zones; keep vertical scrolling working while holding. */
 .post-actions, .creact {

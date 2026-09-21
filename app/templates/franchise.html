@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Franchise Hub — BudzBook{% endblock %}
+{% block content %}
+<h2>🏈 Franchise Hub</h2>
+<div class="cta-row" style="margin-bottom:12px">
+  {% if leagues|length > 1 %}
+  <form method="get" action="/franchise" style="display:inline">
+    <select name="league" onchange="this.form.submit()">
+      {% for l in leagues %}
+      <option value="{{ l.id }}" {% if l.id == league_id %}selected{% endif %}>League {{ l.id }} — {{ l.owners|join(", ") }}</option>
+      {% endfor %}
+    </select>
+  </form>
+  {% elif leagues|length == 1 %}
+  <span class="muted">League {{ leagues[0].id }} — {{ leagues[0].owners|join(", ") }}</span>
+  {% endif %}
+  {% if user %}<a class="btn" href="/franchise/link">🔗 Link your franchise</a>{% endif %}
+</div>
+
+{% if not view %}
+<div class="card"><p class="muted">No franchise exports yet. {% if user %}<a href="/franchise/link">Link your Madden franchise</a> to get your league on this page.{% else %}Log in and link your Madden franchise to get your league on this page.{% endif %}</p></div>
+{% else %}
+<p class="muted">Data from {{ view.week_label }} exports · last sync {{ view.batch_ts }}{% if view.current_week %} · league is on Week {{ view.current_week }}{% endif %}</p>
+
+<h3>Standings</h3>
+{% for div_name, rows in view.divisions %}
+<div class="card">
+<h4>{{ div_name }}</h4>
+<div class="table-scroll"><table class="board">
+  <tr><th>Team</th><th>W</th><th>L</th><th>T</th><th>PCT</th><th>Streak</th><th>PF</th><th>PA</th><th>OVR</th>{% if rows[0].coach %}<th>Coach</th>{% endif %}</tr>
+  {% for r in rows %}
+  <tr>
+    <td><b>{{ r.abbr }}</b> <span class="muted">{{ r.city }} {{ r.nick }}</span></td>
+    <td>{{ r.w }}</td><td>{{ r.l }}</td><td>{{ r.t }}</td>
+    <td>{{ "%.3f"|format(r.pct) }}</td>
+    <td>{{ r.streak }}</td><td>{{ r.pf }}</td><td>{{ r.pa }}</td><td>{{ r.ovr }}</td>
+    {% if rows[0].coach %}<td class="muted">{{ r.coach }}</td>{% endif %}
+  </tr>
+  {% endfor %}
+</table></div>
+</div>
+{% endfor %}
+
+<h3>Schedule &amp; scores</h3>
+{% for wk in view.schedule %}
+<div class="card">
+<h4>Week {{ wk.week }}</h4>
+<div class="table-scroll"><table class="board">
+  {% for g in wk.games %}
+  <tr>
+    <td><b>{{ g.away }}</b></td><td>{% if g.final %}{{ g.away_score }}{% else %}@{% endif %}</td>
+    <td><b>{{ g.home }}</b></td><td>{% if g.final %}{{ g.home_score }}{% else %}{% endif %}</td>
+    <td class="muted">{% if g.final %}Final{% else %}upcoming{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+</div>
+{% endfor %}
+
+<h3>Team stats</h3>
+<div class="card">
+<div class="table-scroll"><table class="board">
+  <tr><th>Team</th><th>Off yds</th><th>Pass yds</th><th>Rush yds</th><th>Pts/g</th><th>Def yds</th><th>Opp pts/g</th><th>TO diff</th></tr>
+  {% for t in view.team_stats %}
+  <tr><td><b>{{ t.abbr }}</b></td><td>{{ t.off_yds }}</td><td>{{ t.off_pass }}</td><td>{{ t.off_rush }}</td>
+      <td>{{ t.ppg }}</td><td>{{ t.def_yds }}</td><td>{{ t.dppg }}</td><td>{{ t.to_diff }}</td></tr>
+  {% endfor %}
+</table></div>
+</div>
+<p class="muted">Team stats from {{ view.week_label }}.</p>
+
+<h3>Stat leaders</h3>
+<div class="card">
+<h4>🎯 Passing yards</h4>
+<div class="table-scroll"><table class="board">
+  {% for p in view.leaders.passing %}
+  <tr><td>{{ loop.index }}</td><td><b>{{ p.name }}</b> <span class="muted">{{ p.team }}</span></td>
+      <td>{{ p.passYds }} yds</td><td>{{ p.passTDs }} TD</td><td>{{ p.passInts }} INT</td></tr>
+  {% endfor %}
+</table></div>
+<h4>🏃 Rushing yards</h4>
+<div class="table-scroll"><table class="board">
+  {% for p in view.leaders.rushing %}
+  <tr><td>{{ loop.index }}</td><td><b>{{ p.name }}</b> <span class="muted">{{ p.team }}</span></td>
+      <td>{{ p.rushYds }} yds</td><td>{{ p.rushAtt }} att</td><td>{{ p.rushTDs }} TD</td></tr>
+  {% endfor %}
+</table></div>
+<h4>🙌 Receiving yards</h4>
+<div class="table-scroll"><table class="board">
+  {% for p in view.leaders.receiving %}
+  <tr><td>{{ loop.index }}</td><td><b>{{ p.name }}</b> <span class="muted">{{ p.team }}</span></td>
+      <td>{{ p.recYds }} yds</td><td>{{ p.recCatches }} rec</td><td>{{ p.recTDs }} TD</td></tr>
+  {% endfor %}
+</table></div>
+<h4>💥 Sacks</h4>
+<div class="table-scroll"><table class="board">
+  {% for p in view.leaders.sacks %}
+  <tr><td>{{ loop.index }}</td><td><b>{{ p.name }}</b> <span class="muted">{{ p.team }}</span></td>
+      <td>{{ p.defSacks }} sacks</td></tr>
+  {% endfor %}
+</table></div>
+<h4>👐 Interceptions</h4>
+<div class="table-scroll"><table class="board">
+  {% for p in view.leaders.ints %}
+  <tr><td>{{ loop.index }}</td><td><b>{{ p.name }}</b> <span class="muted">{{ p.team }}</span></td>
+      <td>{{ p.defInts }} INT</td></tr>
+  {% endfor %}
+</table></div>
+<h4>🧱 Tackles</h4>
+<div class="table-scroll"><table class="board">
+  {% for p in view.leaders.tackles %}
+  <tr><td>{{ loop.index }}</td><td><b>{{ p.name }}</b> <span class="muted">{{ p.team }}</span></td>
+      <td>{{ p.defTotalTackles }} tackles</td></tr>
+  {% endfor %}
+</table></div>
+</div>
+<p class="muted">Leaders are season totals summed across every export received so far.</p>
+{% endif %}
+{% endblock %}

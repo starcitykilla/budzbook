@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -130,7 +130,7 @@
   }
 
   /* ================= HUG CAM (center-bottom) ================= */
-  #stage-hug { position:absolute; left:50%; bottom:40px; transform:translateX(-50%);
+  #stage-hug { position:absolute; zoom:.25; left:50%; bottom:40px; transform:translateX(-50%);
                width:560px; text-align:center;
                transition:opacity .45s ease, transform .45s ease; pointer-events:none; }
   #stage-hug.hide { opacity:0; transform:translateX(-50%) translateY(30px); }
@@ -140,6 +140,16 @@
                  margin-bottom:6px; white-space:nowrap; }
   #hug-video { width:560px; height:auto; display:block; margin:0 auto; }
 
+  /* ================= TEAM HYPE (center-bottom) ================= */
+  #stage-team { position:absolute; left:50%; bottom:40px; transform:translateX(-50%);
+               width:560px; text-align:center;
+               transition:opacity .45s ease, transform .45s ease; pointer-events:none; }
+  #stage-team.hide { opacity:0; transform:translateX(-50%) translateY(30px); }
+  #stage-team.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  #team-caption { font-size:44px; letter-spacing:2px; color:#f6e27a;
+                 text-shadow:0 0 18px rgba(232,195,74,.9), 0 3px 8px rgba(0,0,0,.9);
+                 margin-bottom:6px; white-space:nowrap; }
+  #team-video { width:560px; height:auto; display:block; margin:0 auto; }
   /* ================= SWEAT TICKER (top-right) ================= */
   #stage-sweat { position:absolute; right:28px; top:28px; width:332px;
                  background:rgba(0,0,0,.55); border:2px solid rgba(212,175,55,.85);
@@ -207,6 +217,10 @@
     <video id="hug-video" src="hug.webm" muted playsinline preload="auto"></video>
   </div>
 
+  <!-- TEAM HYPE -->
+  <div id="stage-team" class="hide">
+    <div id="team-caption"></div>
+    <video id="team-video" src="team.webm" muted playsinline preload="auto"></video>
   <!-- SWEAT TICKER -->
   <div id="stage-sweat" class="hide">
     <div class="sweat-head"><span class="dot"></span><span>BUDZ PICKS SWEAT</span></div>
@@ -353,6 +367,31 @@
     hideTimerH = setTimeout(finishHug, 16000);
   }
 
+  /* ================= TEAM HYPE ================= */
+  var stageT = document.getElementById('stage-team');
+  var videoT = document.getElementById('team-video');
+  var captionT = document.getElementById('team-caption');
+  var hideTimerT = null;
+  function finishTeam(){
+    if (hideTimerT) { clearTimeout(hideTimerT); hideTimerT = null; }
+    stageT.classList.remove('show');
+    stageT.classList.add('hide');
+    try { videoT.pause(); } catch(e) {}
+    busy = false;
+  }
+  videoT.addEventListener('ended', function(){ setTimeout(finishTeam, 900); });
+  function showTeam(d){
+    captionT.textContent = '\u{1F3C8} TEAM HYPE \u2014 LET\'S GOOOO!';
+    stageT.classList.remove('hide');
+    void stageT.offsetWidth;
+    stageT.classList.add('show');
+    try {
+      videoT.currentTime = 0;
+      var p = videoT.play();
+      if (p && p.catch) { p.catch(function(){ finishTeam(); }); }
+    } catch(e) { finishTeam(); return; }
+    hideTimerT = setTimeout(finishTeam, 16000);
+  }
   /* ================= SWEAT TICKER ================= */
   var stageS = document.getElementById('stage-sweat');
   var sweatBody = document.getElementById('sweat-body');
@@ -416,7 +455,8 @@
   var watchers = [
     { file:'triggers/entry.json', last:0, show:showEntry },
     { file:'triggers/flair.json', last:0, show:showFlair },
-    { file:'triggers/hug.json',   last:0, show:showHug   }
+    { file:'triggers/hug.json',   last:0, show:showHug   },
+    { file:'triggers/team.json',  last:0, show:showTeam  }
   ];
   async function poll(){
     for (var i = 0; i < watchers.length; i++) {
