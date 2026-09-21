@@ -1,0 +1,193 @@
+{
+  "2026-09-17": {
+    "post_id": 5,
+    "live_announced": true,
+    "legs": {
+      "Safe pick|0": {
+        "started": true,
+        "final": true,
+        "result": "win"
+      },
+      "Safe pick|1": {
+        "started": false,
+        "final": true,
+        "result": "win"
+      },
+      "Safe pick|2": {
+        "started": false,
+        "final": true,
+        "result": "win"
+      },
+      "Lotto pick|0": {
+        "started": true,
+        "final": true,
+        "result": "win"
+      },
+      "Lotto pick|1": {
+        "started": true,
+        "final": false
+      },
+      "Lotto pick|2": {
+        "started": false,
+        "final": true,
+        "result": "win"
+      },
+      "Lotto pick|3": {
+        "started": true,
+        "final": true,
+        "result": "win"
+      },
+      "Lotto pick|4": {
+        "started": true,
+        "final": true,
+        "result": "win"
+      }
+    },
+    "tickets_final": {
+      "Safe pick": true
+    }
+  },
+  "2026-09-18": {
+    "post_id": 10,
+    "live_announced": true,
+    "legs": {
+      "Safe pick|0": {
+        "started": true,
+        "final": false
+      },
+      "Safe pick|1": {
+        "started": true,
+        "final": true,
+        "result": "win"
+      },
+      "Safe pick|2": {
+        "started": true,
+        "final": true,
+        "result": "win"
+      },
+      "Lotto pick|0": {
+        "started": true,
+        "final": true,
+        "result": "loss"
+      },
+      "Lotto pick|1": {
+        "started": true,
+        "final": true,
+        "result": "win"
+      },
+      "Lotto pick|2": {
+        "started": true,
+        "final": false
+      },
+      "Lotto pick|3": {
+        "started": true,
+        "final": true,
+        "result": "win"
+      },
+      "Lotto pick|4": {
+        "started": true,
+        "final": true,
+        "result": "win"
+      }
+    },
+    "tickets_final": {}
+  },
+  "2026-09-19": {
+    "post_id": 14,
+    "live_announced": true,
+    "legs": {
+      "Safe pick|0": {
+        "started": true,
+        "final": true,
+        "result": "win"
+      },
+      "Safe pick|1": {
+        "started": true,
+        "final": true,
+        "result": "loss"
+      },
+      "Safe pick|2": {
+        "started": true,
+        "final": false
+      },
+      "Lotto pick|0": {
+        "started": true,
+        "final": true,
+        "result": "win"
+      },
+      "Lotto pick|1": {
+        "started": true,
+        "final": true,
+        "result": "loss"
+      },
+      "Lotto pick|2": {
+        "started": true,
+        "final": true,
+        "result": "win"
+      },
+      "Lotto pick|3": {
+        "started": true,
+        "final": true,
+        "result": "win"
+      },
+      "Lotto pick|4": {
+        "started": true,
+        "final": true,
+        "result": "loss"
+      }
+    },
+    "tickets_final": {
+      "Lotto pick": true
+    }
+  },
+  "2026-09-20": {
+    "post_id": 16,
+    "live_announced": true,
+    "legs": {
+      "Safe pick|0": {
+        "started": true,
+        "final": true,
+        "result": "win"
+      },
+      "Safe pick|1": {
+        "started": true,
+        "final": true,
+        "result": "win"
+      },
+      "Safe pick|2": {
+        "started": true,
+        "final": true,
+        "result": "loss"
+      },
+      "Lotto pick|0": {
+        "started": true,
+        "final": true,
+        "result": "win"
+      },
+      "Lotto pick|1": {
+        "started": true,
+        "final": true,
+        "result": "win"
+      },
+      "Lotto pick|2": {
+        "started": true,
+        "final": true,
+        "result": "win"
+      },
+      "Lotto pick|3": {
+        "started": true,
+        "final": true,
+        "result": "win"
+      },
+      "Lotto pick|4": {
+        "started": true,
+        "final": true,
+        "result": "win"
+      }
+    },
+    "tickets_final": {
+      "Safe pick": true,
+      "Lotto pick": true
+    }
+  }
+}

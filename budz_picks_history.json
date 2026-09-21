@@ -1,0 +1,665 @@
+{
+  "entries": [
+    {
+      "date": "2026-09-16",
+      "format": "legacy",
+      "tickets": [
+        {
+          "name": "Legacy parlay",
+          "tagline": "Old-format ticket — carried over for grading.",
+          "legs": [
+            {
+              "sport": "nfl",
+              "home": "Buffalo Bills",
+              "away": "Detroit Lions",
+              "pick": "home",
+              "market": "ml",
+              "line": null,
+              "odds": -220,
+              "desc": "Buffalo Bills ML (-220)",
+              "tip": "Thu 9/17 8:15 PM ET",
+              "commence": null,
+              "final": "Buffalo Bills 41, Detroit Lions 31",
+              "leg_result": "win",
+              "analysis": "Buffalo Bills 41-31 — took it outright, ML cashes."
+            },
+            {
+              "sport": "mlb",
+              "home": "Cincinnati Reds",
+              "away": "Los Angeles Dodgers",
+              "pick": "away",
+              "market": "ml",
+              "line": null,
+              "odds": -210,
+              "desc": "Los Angeles Dodgers ML (-210)",
+              "tip": "Wed 9/16 6:41 PM ET",
+              "commence": null,
+              "final": "Cincinnati Reds 6, Los Angeles Dodgers 2",
+              "leg_result": "loss",
+              "analysis": "Los Angeles Dodgers 2-6 — upset, ML busts."
+            },
+            {
+              "sport": "mlb",
+              "home": "Washington Nationals",
+              "away": "Philadelphia Phillies",
+              "pick": "away",
+              "market": "ml",
+              "line": null,
+              "odds": -196,
+              "desc": "Philadelphia Phillies ML (-196)",
+              "tip": "Wed 9/16 6:46 PM ET",
+              "commence": null,
+              "final": "Washington Nationals 0, Philadelphia Phillies 3",
+              "leg_result": "win",
+              "analysis": "Philadelphia Phillies 3-0 — took it outright, ML cashes."
+            }
+          ],
+          "combined_odds": "+224",
+          "stake_budz": 50,
+          "result": "bust"
+        }
+      ],
+      "record": {
+        "wins": 0,
+        "losses": 1,
+        "net_budz": -50
+      }
+    },
+    {
+      "date": "2026-09-17",
+      "format": "v2",
+      "tickets": [
+        {
+          "name": "Safe pick",
+          "tagline": "The steadier ticket — chalk that should hold.",
+          "legs": [
+            {
+              "sport": "nfl",
+              "home": "Buffalo Bills",
+              "away": "Detroit Lions",
+              "pick": "home",
+              "market": "ml",
+              "line": null,
+              "odds": -240,
+              "desc": "Buffalo Bills ML (-240)",
+              "tip": "Thu 9/17 8:15 PM ET",
+              "commence": "2026-09-18T00:15:00Z",
+              "final": "Buffalo Bills 41, Detroit Lions 31",
+              "leg_result": "win",
+              "analysis": "Buffalo Bills 41-31 — took it outright, ML cashes."
+            },
+            {
+              "sport": "mlb",
+              "home": "Cincinnati Reds",
+              "away": "Los Angeles Dodgers",
+              "pick": "away",
+              "market": "ml",
+              "line": null,
+              "odds": -166,
+              "desc": "Los Angeles Dodgers ML (-166)",
+              "tip": "Thu 9/17 12:41 PM ET",
+              "commence": "2026-09-17T16:41:00Z",
+              "final": "Cincinnati Reds 2, Los Angeles Dodgers 8",
+              "leg_result": "win",
+              "analysis": "Los Angeles Dodgers 8-2 — took it outright, ML cashes."
+            },
+            {
+              "sport": "mlb",
+              "home": "Colorado Rockies",
+              "away": "San Diego Padres",
+              "pick": "away",
+              "market": "ml",
+              "line": null,
+              "odds": -164,
+              "desc": "San Diego Padres ML (-164)",
+              "tip": "Thu 9/17 3:10 PM ET",
+              "commence": "2026-09-17T19:10:00Z",
+              "final": "Colorado Rockies 2, San Diego Padres 9",
+              "leg_result": "win",
+              "analysis": "San Diego Padres 9-2 — took it outright, ML cashes."
+            }
+          ],
+          "combined_odds": "+265",
+          "stake_budz": 50,
+          "result": "win"
+        },
+        {
+          "name": "Lotto pick",
+          "tagline": "Big odds, but every leg has a real path.",
+          "legs": [
+            {
+              "sport": "mlb",
+              "home": "New York Mets",
+              "away": "Philadelphia Phillies",
+              "pick": "away",
+              "market": "ml",
+              "line": null,
+              "odds": 114,
+              "desc": "Philadelphia Phillies ML (+114)",
+              "tip": "Thu 9/17 7:16 PM ET",
+              "commence": "2026-09-17T23:16:00Z",
+              "final": "New York Mets 0, Philadelphia Phillies 3",
+              "leg_result": "win",
+              "analysis": "Philadelphia Phillies 3-0 — took it outright, ML cashes."
+            },
+            {
+              "sport": "mlb",
+              "home": "Los Angeles Angels",
+              "away": "Minnesota Twins",
+              "pick": "home",
+              "market": "ml",
+              "line": null,
+              "odds": 114,
+              "desc": "Los Angeles Angels ML (+114)",
+              "tip": "Thu 9/17 9:39 PM ET",
+              "commence": "2026-09-18T01:39:00Z",
+              "final": "Los Angeles Angels 5, Minnesota Twins 4",
+              "leg_result": "win",
+              "analysis": "Los Angeles Angels 5-4 — took it outright, ML cashes."
+            },
+            {
+              "sport": "mlb",
+              "home": "Tampa Bay Rays",
+              "away": "Athletics",
+              "pick": "home",
+              "market": "ml",
+              "line": null,
+              "odds": -275,
+              "desc": "Tampa Bay Rays ML (-275)",
+              "tip": "Thu 9/17 1:10 PM ET",
+              "commence": "2026-09-17T17:10:00Z",
+              "final": "Tampa Bay Rays 10, Athletics 1",
+              "leg_result": "win",
+              "analysis": "Tampa Bay Rays 10-1 — took it outright, ML cashes."
+            },
+            {
+              "sport": "mlb",
+              "home": "Houston Astros",
+              "away": "Kansas City Royals",
+              "pick": "home",
+              "market": "ml",
+              "line": null,
+              "odds": -154,
+              "desc": "Houston Astros ML (-154)",
+              "tip": "Thu 9/17 7:16 PM ET",
+              "commence": "2026-09-17T23:16:00Z",
+              "final": "Houston Astros 6, Kansas City Royals 2",
+              "leg_result": "win",
+              "analysis": "Houston Astros 6-2 — took it outright, ML cashes."
+            },
+            {
+              "sport": "mlb",
+              "home": "Texas Rangers",
+              "away": "Boston Red Sox",
+              "pick": "away",
+              "market": "ml",
+              "line": null,
+              "odds": -144,
+              "desc": "Boston Red Sox ML (-144)",
+              "tip": "Thu 9/17 8:06 PM ET",
+              "commence": "2026-09-18T00:06:00Z",
+              "final": "Texas Rangers 3, Boston Red Sox 4",
+              "leg_result": "win",
+              "analysis": "Boston Red Sox 4-3 — took it outright, ML cashes."
+            }
+          ],
+          "combined_odds": "+1645",
+          "stake_budz": 25,
+          "result": "win"
+        }
+      ],
+      "record": {
+        "wins": 2,
+        "losses": 1,
+        "net_budz": 493
+      }
+    },
+    {
+      "date": "2026-09-18",
+      "format": "v2",
+      "tickets": [
+        {
+          "name": "Safe pick",
+          "tagline": "The steadier ticket — chalk that should hold.",
+          "legs": [
+            {
+              "sport": "mlb",
+              "home": "San Diego Padres",
+              "away": "Miami Marlins",
+              "pick": "home",
+              "market": "ml",
+              "line": null,
+              "odds": -200,
+              "desc": "San Diego Padres ML (-200)",
+              "tip": "Fri 9/18 9:41 PM ET",
+              "commence": "2026-09-19T01:41:00Z",
+              "final": "San Diego Padres 8, Miami Marlins 2",
+              "leg_result": "win",
+              "analysis": "San Diego Padres 8-2 — took it outright, ML cashes."
+            },
+            {
+              "sport": "mlb",
+              "home": "Cleveland Guardians",
+              "away": "Athletics",
+              "pick": "home",
+              "market": "ml",
+              "line": null,
+              "odds": -198,
+              "desc": "Cleveland Guardians ML (-198)",
+              "tip": "Fri 9/18 7:11 PM ET",
+              "commence": "2026-09-18T23:11:00Z",
+              "final": "Cleveland Guardians 5, Athletics 3",
+              "leg_result": "win",
+              "analysis": "Cleveland Guardians 5-3 — took it outright, ML cashes."
+            },
+            {
+              "sport": "mlb",
+              "home": "Colorado Rockies",
+              "away": "Seattle Mariners",
+              "pick": "away",
+              "market": "ml",
+              "line": null,
+              "odds": -186,
+              "desc": "Seattle Mariners ML (-186)",
+              "tip": "Fri 9/18 8:11 PM ET",
+              "commence": "2026-09-19T00:11:00Z",
+              "final": "Colorado Rockies 4, Seattle Mariners 5",
+              "leg_result": "win",
+              "analysis": "Seattle Mariners 5-4 — took it outright, ML cashes."
+            }
+          ],
+          "combined_odds": "+247",
+          "stake_budz": 50,
+          "result": "win"
+        },
+        {
+          "name": "Lotto pick",
+          "tagline": "Big odds, but every leg has a real path.",
+          "legs": [
+            {
+              "sport": "mlb",
+              "home": "New York Mets",
+              "away": "Philadelphia Phillies",
+              "pick": "away",
+              "market": "ml",
+              "line": null,
+              "odds": 100,
+              "desc": "Philadelphia Phillies ML (+100)",
+              "tip": "Fri 9/18 7:16 PM ET",
+              "commence": "2026-09-18T23:16:00Z",
+              "final": "New York Mets 6, Philadelphia Phillies 3",
+              "leg_result": "loss",
+              "analysis": "Philadelphia Phillies 3-6 — upset, ML busts."
+            },
+            {
+              "sport": "mlb",
+              "home": "Cincinnati Reds",
+              "away": "Chicago Cubs",
+              "pick": "home",
+              "market": "ml",
+              "line": null,
+              "odds": 108,
+              "desc": "Cincinnati Reds ML (+108)",
+              "tip": "Fri 9/18 6:41 PM ET",
+              "commence": "2026-09-18T22:41:00Z",
+              "final": "Cincinnati Reds 6, Chicago Cubs 4",
+              "leg_result": "win",
+              "analysis": "Cincinnati Reds 6-4 — took it outright, ML cashes."
+            },
+            {
+              "sport": "mlb",
+              "home": "Los Angeles Dodgers",
+              "away": "San Francisco Giants",
+              "pick": "home",
+              "market": "ml",
+              "line": null,
+              "odds": -295,
+              "desc": "Los Angeles Dodgers ML (-295)",
+              "tip": "Fri 9/18 10:15 PM ET",
+              "commence": "2026-09-19T02:15:00Z",
+              "final": "Los Angeles Dodgers 8, San Francisco Giants 2",
+              "leg_result": "win",
+              "analysis": "Los Angeles Dodgers 8-2 — took it outright, ML cashes."
+            },
+            {
+              "sport": "mlb",
+              "home": "Pittsburgh Pirates",
+              "away": "Kansas City Royals",
+              "pick": "home",
+              "market": "ml",
+              "line": null,
+              "odds": -184,
+              "desc": "Pittsburgh Pirates ML (-184)",
+              "tip": "Fri 9/18 6:41 PM ET",
+              "commence": "2026-09-18T22:41:00Z",
+              "final": "Pittsburgh Pirates 8, Kansas City Royals 5",
+              "leg_result": "win",
+              "analysis": "Pittsburgh Pirates 8-5 — took it outright, ML cashes."
+            },
+            {
+              "sport": "mlb",
+              "home": "Baltimore Orioles",
+              "away": "Milwaukee Brewers",
+              "pick": "away",
+              "market": "ml",
+              "line": null,
+              "odds": -138,
+              "desc": "Milwaukee Brewers ML (-138)",
+              "tip": "Fri 9/18 7:06 PM ET",
+              "commence": "2026-09-18T23:06:00Z",
+              "final": "Baltimore Orioles 5, Milwaukee Brewers 6",
+              "leg_result": "win",
+              "analysis": "Milwaukee Brewers 6-5 — took it outright, ML cashes."
+            }
+          ],
+          "combined_odds": "+1383",
+          "stake_budz": 25,
+          "result": "bust"
+        }
+      ],
+      "record": {
+        "wins": 3,
+        "losses": 2,
+        "net_budz": 591
+      }
+    },
+    {
+      "date": "2026-09-19",
+      "format": "v2",
+      "tickets": [
+        {
+          "name": "Safe pick",
+          "tagline": "The steadier ticket — chalk that should hold.",
+          "legs": [
+            {
+              "sport": "mlb",
+              "home": "Cleveland Guardians",
+              "away": "Athletics",
+              "pick": "home",
+              "market": "ml",
+              "line": null,
+              "odds": -178,
+              "desc": "Cleveland Guardians ML (-178)",
+              "tip": "Sat 9/19 6:11 PM ET",
+              "commence": "2026-09-19T22:11:00Z",
+              "final": "Cleveland Guardians 12, Athletics 6",
+              "leg_result": "win",
+              "analysis": "Cleveland Guardians 12-6 — took it outright, ML cashes."
+            },
+            {
+              "sport": "mlb",
+              "home": "Colorado Rockies",
+              "away": "Seattle Mariners",
+              "pick": "away",
+              "market": "ml",
+              "line": null,
+              "odds": -162,
+              "desc": "Seattle Mariners ML (-162)",
+              "tip": "Sat 9/19 8:11 PM ET",
+              "commence": "2026-09-20T00:11:00Z",
+              "final": "Colorado Rockies 5, Seattle Mariners 3",
+              "leg_result": "loss",
+              "analysis": "Seattle Mariners 3-5 — upset, ML busts."
+            },
+            {
+              "sport": "mlb",
+              "home": "San Diego Padres",
+              "away": "Miami Marlins",
+              "pick": "home",
+              "market": "ml",
+              "line": null,
+              "odds": -156,
+              "desc": "San Diego Padres ML (-156)",
+              "tip": "Sat 9/19 8:40 PM ET",
+              "commence": "2026-09-20T00:40:00Z",
+              "final": "San Diego Padres 7, Miami Marlins 6",
+              "leg_result": "win",
+              "analysis": "San Diego Padres 7-6 — took it outright, ML cashes."
+            }
+          ],
+          "combined_odds": "+315",
+          "stake_budz": 50,
+          "result": "bust"
+        },
+        {
+          "name": "Lotto pick",
+          "tagline": "Big odds, but every leg has a real path.",
+          "legs": [
+            {
+              "sport": "mlb",
+              "home": "Houston Astros",
+              "away": "Atlanta Braves",
+              "pick": "away",
+              "market": "ml",
+              "line": null,
+              "odds": 100,
+              "desc": "Atlanta Braves ML (+100)",
+              "tip": "Sat 9/19 7:11 PM ET",
+              "commence": "2026-09-19T23:11:00Z",
+              "final": "Houston Astros 2, Atlanta Braves 6",
+              "leg_result": "win",
+              "analysis": "Atlanta Braves 6-2 — took it outright, ML cashes."
+            },
+            {
+              "sport": "mlb",
+              "home": "New York Mets",
+              "away": "Philadelphia Phillies",
+              "pick": "away",
+              "market": "ml",
+              "line": null,
+              "odds": 102,
+              "desc": "Philadelphia Phillies ML (+102)",
+              "tip": "Sat 9/19 4:11 PM ET",
+              "commence": "2026-09-19T20:11:00Z",
+              "final": "New York Mets 10, Philadelphia Phillies 3",
+              "leg_result": "loss",
+              "analysis": "Philadelphia Phillies 3-10 — upset, ML busts."
+            },
+            {
+              "sport": "mlb",
+              "home": "Chicago White Sox",
+              "away": "Detroit Tigers",
+              "pick": "home",
+              "market": "ml",
+              "line": null,
+              "odds": -138,
+              "desc": "Chicago White Sox ML (-138)",
+              "tip": "Sat 9/19 2:11 PM ET",
+              "commence": "2026-09-19T18:11:00Z",
+              "final": "Chicago White Sox 3, Detroit Tigers 1",
+              "leg_result": "win",
+              "analysis": "Chicago White Sox 3-1 — took it outright, ML cashes."
+            },
+            {
+              "sport": "mlb",
+              "home": "Cincinnati Reds",
+              "away": "Chicago Cubs",
+              "pick": "away",
+              "market": "ml",
+              "line": null,
+              "odds": -138,
+              "desc": "Chicago Cubs ML (-138)",
+              "tip": "Sat 9/19 6:41 PM ET",
+              "commence": "2026-09-19T22:41:00Z",
+              "final": "Cincinnati Reds 2, Chicago Cubs 5",
+              "leg_result": "win",
+              "analysis": "Chicago Cubs 5-2 — took it outright, ML cashes."
+            },
+            {
+              "sport": "mlb",
+              "home": "Arizona Diamondbacks",
+              "away": "New York Yankees",
+              "pick": "away",
+              "market": "ml",
+              "line": null,
+              "odds": -138,
+              "desc": "New York Yankees ML (-138)",
+              "tip": "Sat 9/19 8:10 PM ET",
+              "commence": "2026-09-20T00:10:00Z",
+              "final": "Arizona Diamondbacks 5, New York Yankees 3",
+              "leg_result": "loss",
+              "analysis": "New York Yankees 3-5 — upset, ML busts."
+            }
+          ],
+          "combined_odds": "+1972",
+          "stake_budz": 25,
+          "result": "bust"
+        }
+      ],
+      "record": {
+        "wins": 3,
+        "losses": 4,
+        "net_budz": 516
+      }
+    },
+    {
+      "date": "2026-09-20",
+      "format": "v2",
+      "tickets": [
+        {
+          "name": "Safe pick",
+          "tagline": "The steadier ticket — chalk that should hold.",
+          "legs": [
+            {
+              "sport": "nfl",
+              "home": "New England Patriots",
+              "away": "Pittsburgh Steelers",
+              "pick": "home",
+              "market": "ml",
+              "line": null,
+              "odds": -250,
+              "desc": "New England Patriots ML (-250)",
+              "tip": "Sun 9/20 1:00 PM ET",
+              "commence": "2026-09-20T17:00:00Z",
+              "final": null,
+              "leg_result": "pending",
+              "analysis": null
+            },
+            {
+              "sport": "mlb",
+              "home": "Cleveland Guardians",
+              "away": "Athletics",
+              "pick": "home",
+              "market": "ml",
+              "line": null,
+              "odds": -230,
+              "desc": "Cleveland Guardians ML (-230)",
+              "tip": "Sun 9/20 1:41 PM ET",
+              "commence": "2026-09-20T17:41:00Z",
+              "final": null,
+              "leg_result": "pending",
+              "analysis": null
+            },
+            {
+              "sport": "nfl",
+              "home": "Chicago Bears",
+              "away": "Minnesota Vikings",
+              "pick": "home",
+              "market": "ml",
+              "line": null,
+              "odds": -225,
+              "desc": "Chicago Bears ML (-225)",
+              "tip": "Sun 9/20 1:00 PM ET",
+              "commence": "2026-09-20T17:00:00Z",
+              "final": null,
+              "leg_result": "pending",
+              "analysis": null
+            }
+          ],
+          "combined_odds": "+190",
+          "stake_budz": 50,
+          "result": "pending"
+        },
+        {
+          "name": "Lotto pick",
+          "tagline": "Big odds, but every leg has a real path.",
+          "legs": [
+            {
+              "sport": "mlb",
+              "home": "Pittsburgh Pirates",
+              "away": "Kansas City Royals",
+              "pick": "home",
+              "market": "ml",
+              "line": null,
+              "odds": 102,
+              "desc": "Pittsburgh Pirates ML (+102)",
+              "tip": "Sun 9/20 1:36 PM ET",
+              "commence": "2026-09-20T17:36:00Z",
+              "final": null,
+              "leg_result": "pending",
+              "analysis": null
+            },
+            {
+              "sport": "mlb",
+              "home": "Los Angeles Angels",
+              "away": "Minnesota Twins",
+              "pick": "home",
+              "market": "ml",
+              "line": null,
+              "odds": 104,
+              "desc": "Los Angeles Angels ML (+104)",
+              "tip": "Sun 9/20 4:08 PM ET",
+              "commence": "2026-09-20T20:08:00Z",
+              "final": "Los Angeles Angels 6, Minnesota Twins 5",
+              "leg_result": "win",
+              "analysis": "Los Angeles Angels 6-5 — took it outright, ML cashes."
+            },
+            {
+              "sport": "mlb",
+              "home": "Los Angeles Dodgers",
+              "away": "San Francisco Giants",
+              "pick": "home",
+              "market": "ml",
+              "line": null,
+              "odds": -270,
+              "desc": "Los Angeles Dodgers ML (-270)",
+              "tip": "Sun 9/20 4:11 PM ET",
+              "commence": "2026-09-20T20:11:00Z",
+              "final": "Los Angeles Dodgers 10, San Francisco Giants 4",
+              "leg_result": "win",
+              "analysis": "Los Angeles Dodgers 10-4 — took it outright, ML cashes."
+            },
+            {
+              "sport": "mlb",
+              "home": "Baltimore Orioles",
+              "away": "Milwaukee Brewers",
+              "pick": "away",
+              "market": "ml",
+              "line": null,
+              "odds": -215,
+              "desc": "Milwaukee Brewers ML (-215)",
+              "tip": "Sun 9/20 7:21 PM ET",
+              "commence": "2026-09-20T23:21:00Z",
+              "final": null,
+              "leg_result": "pending",
+              "analysis": null
+            },
+            {
+              "sport": "nfl",
+              "home": "Arizona Cardinals",
+              "away": "Seattle Seahawks",
+              "pick": "away",
+              "market": "ml",
+              "line": null,
+              "odds": -210,
+              "desc": "Seattle Seahawks ML (-210)",
+              "tip": "Sun 9/20 4:25 PM ET",
+              "commence": "2026-09-20T20:25:00Z",
+              "final": null,
+              "leg_result": "pending",
+              "analysis": null
+            }
+          ],
+          "combined_odds": "+1121",
+          "stake_budz": 25,
+          "result": "pending"
+        }
+      ],
+      "record": {
+        "wins": 3,
+        "losses": 4,
+        "net_budz": 516
+      }
+    }
+  ]
+}

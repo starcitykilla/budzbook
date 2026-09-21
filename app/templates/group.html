@@ -5,7 +5,22 @@
   <h2>👥 {{ group.name }}</h2>
   {% if group.description %}<p class="muted">{{ group.description }}</p>{% endif %}
   <p class="small muted">{{ group.member_count }} member{{ 's' if group.member_count != 1 }} · started by @{{ group.owner_name }}</p>
-  {% if group.is_member %}
+  {% if franchise_roster %}
+<div class="card">
+  <h3>🏈 League roster</h3>
+  <p class="muted small">Madden Franchise League {{ franchise_roster.league_id }} — auto-grouped from linked exports</p>
+  <div class="table-scroll"><table class="board">
+    {% for m in franchise_roster.members %}
+    <tr>
+      <td><b>@{{ m.username }}</b></td>
+      <td>{% if m.team %}{{ m.team.city }} {{ m.team.nick }} <b>{{ m.team.abbr }}</b> <span class="pill">{{ m.team.w }}-{{ m.team.l }}</span>{% else %}<span class="muted">team not picked</span>{% endif %}</td>
+      <td><a class="btn ghost sm" href="/franchise?u={{ m.username }}">Franchise</a></td>
+    </tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% endif %}
+{% if group.is_member %}
     <form method="post" action="/groups/{{ group.id }}/leave" style="display:inline">
       <button class="btn ghost sm" type="submit">Leave group</button>
     </form>

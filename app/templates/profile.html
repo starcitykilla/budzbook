@@ -61,6 +61,26 @@
     <div class="notice">Your avatar is uploaded and <b>pending mod approval</b> before it can appear on stream. 🌿</div>
   {% endif %}
 </div>
+{% if franchise %}
+<div class="card" style="margin-top:12px">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <b>🏈 Franchise</b>
+    {% if franchise.team %}
+      <span>{{ franchise.team.city }} {{ franchise.team.nick }} <b>{{ franchise.team.abbr }}</b></span>
+      <span class="pill">{{ franchise.team.w }}-{{ franchise.team.l }}{% if franchise.team.t %}-{{ franchise.team.t }}{% endif %}</span>
+      {% if franchise.team.streak %}<span class="muted">{{ franchise.team.streak }}</span>{% endif %}
+    {% else %}
+      <span class="muted">Franchise linked</span>
+    {% endif %}
+    <span class="muted">League {{ franchise.league_id }}{% if franchise.week_label %} · {{ franchise.week_label }} exports{% endif %}{% if franchise.current_week %} · on Week {{ franchise.current_week }}{% endif %}{% if franchise.age %} · updated {{ franchise.age }}{% endif %}</span>
+    <a class="btn" href="/franchise?u={{ profile.username }}">View franchise</a>
+  </div>
+</div>
+{% elif franchise_linkable %}
+<div class="card muted" style="margin-top:12px">
+  🏈 No Madden franchise linked yet — <a href="/franchise/link">link yours</a> to show your team and record here.
+</div>
+{% endif %}
 <h3>Posts</h3>
 {% for post in posts %}
   {% include "_post.html" %}

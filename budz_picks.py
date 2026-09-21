@@ -257,7 +257,8 @@ def _parse_espn_board(data):
             else:
                 away, aws = team, score
         games.append({"home": home, "away": away, "state": state,
-                      "home_score": hs, "away_score": aws})
+                      "home_score": hs, "away_score": aws,
+                      "date": ev.get("date", "")})
     return games
 
 
@@ -346,7 +347,8 @@ def grade_history(h, boards=None, now=None):
                 if leg.get('leg_result') != 'pending':
                     continue
                 game = sportsbook.find_espn_game(
-                    board_for(leg['sport']), leg['home'], leg['away'])
+                    board_for(leg['sport']), leg['home'], leg['away'],
+                    leg.get('commence'))
                 if game is None or game.get('state') != 'post':
                     if _leg_voidable(leg, now):
                         leg['leg_result'] = 'void'
