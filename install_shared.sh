@@ -5,8 +5,20 @@
 set -u
 
 APP="$HOME/budzbook"
-REPO="https://github.com/starcitykilla/budzbook.git"
+REPO_PATH="starcitykilla/budzbook.git"
 BRANCH="jarvis/shared-host-install"
+# Optional: pass a GitHub read-only token as $1 (or enter it when asked)
+# if the repo is private. Never share the token in chat.
+TOKEN="${1:-}"
+if [ -z "$TOKEN" ] && [ ! -d "$APP/.git" ]; then
+  echo -n "GitHub token (only needed while the repo is private; Enter to skip): "
+  read -rs TOKEN; echo
+fi
+if [ -n "$TOKEN" ]; then
+  REPO="https://x-access-token:${TOKEN}@github.com/${REPO_PATH}"
+else
+  REPO="https://github.com/${REPO_PATH}"
+fi
 
 echo "== BudzBook installer =="
 
