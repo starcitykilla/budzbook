@@ -40,21 +40,30 @@ fi
 cd "$APP" || { echo "INSTALL_FAIL: no $APP"; exit 1; }
 
 # 2. Python -------------------------------------------------------------
-PYBIN="$(command -v python3.12 || command -v python3.11 || command -v python3 || true)"
-[ -n "$PYBIN" ] || { echo "INSTALL_FAIL: no python3 found"; exit 1; }
-echo "-- python: $($PYBIN --version 2>&1) at $PYBIN"
+# Single-instance guard: the every-minute cron can overlap a long pip install.
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$HOME/budzbook_install.lock"
+  flock -n 9 || { echo "SKIPPED: another installer run in progress"; exit 3; }
+fi
 
 # Prefer the venv cPanel's Setup Python App created for this app root,
-# so Passenger serves exactly what we install. Fall back to a local venv
-# (used only for the boot check) if the app isn't registered yet.
+# so Passenger serves exactly what we install. The cron environment has
+# no python3 on PATH, so use the venv's python directly when it exists.
+# Fall back to a local venv (used only for the boot check) if the app
+# isn't registered yet.
 VENV=""
 for d in "$HOME"/virtualenv/budzbook/*/; do
   if [ -x "${d}bin/python" ]; then VENV="$d"; break; fi
 done
-if [ -z "$VENV" ]; then
+if [ -n "$VENV" ]; then
+  PYBIN="$VENV/bin/python"
+else
+  PYBIN="$(command -v python3.12 || command -v python3.11 || command -v python3 || true)"
+  [ -n "$PYBIN" ] || { echo "INSTALL_FAIL: no python3 found"; exit 1; }
   VENV="$APP/venv"
   [ -d "$VENV" ] || "$PYBIN" -m venv "$VENV" || { echo "INSTALL_FAIL: venv creation failed"; exit 1; }
 fi
+echo "-- python: $($PYBIN --version 2>&1) at $PYBIN"
 echo "-- venv: $VENV"
 
 # 3. Dependencies --------------------------------------------------------
@@ -83,3 +92,4 @@ else
   head -20 /tmp/budzbook_install_err.log
   exit 1
 fi
+
