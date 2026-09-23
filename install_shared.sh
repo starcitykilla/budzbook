@@ -1,7 +1,14 @@
 #!/bin/bash
-# BudzBook shared-host installer — paste into cPanel Terminal and run.
-# Safe to re-run any time: pulls latest code, reinstalls deps, rewrites
-# the Passenger startup file, and verifies the app boots.
+# BudzBook shared-host installer.
+# Run from cPanel Cron Jobs as a one-shot (Terminal is disabled on this plan):
+#   if [ ! -f ~/budzbook_install.done ]; then git clone -q -b jarvis/shared-host-install https://github.com/starcitykilla/budzbook.git ~/budzbook 2>/dev/null; bash ~/budzbook/install_shared.sh >> ~/budzbook_install.log 2>&1; echo "exit=$? $(date)" >> ~/budzbook_install.log; touch ~/budzbook_install.done; fi
+# Then check ~/budzbook_install.log in File Manager for INSTALL_OK and delete
+# the cron job. Safe to re-run any time: pulls latest code, reinstalls deps,
+# rewrites the Passenger startup file, and verifies the app boots.
+#
+# PREREQUISITE: create the app first in cPanel "Setup Python App" with
+# application root "budzbook" (this also creates the virtualenv we install
+# into). Startup file: passenger_wsgi.py, entry point: application.
 set -u
 
 APP="$HOME/budzbook"
@@ -10,7 +17,7 @@ BRANCH="jarvis/shared-host-install"
 # Optional: pass a GitHub read-only token as $1 (or enter it when asked)
 # if the repo is private. Never share the token in chat.
 TOKEN="${1:-}"
-if [ -z "$TOKEN" ] && [ ! -d "$APP/.git" ]; then
+if [ -z "$TOKEN" ] && [ ! -d "$APP/.git" ] && [ -t 0 ]; then
   echo -n "GitHub token (only needed while the repo is private; Enter to skip): "
   read -rs TOKEN; echo
 fi
