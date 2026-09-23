@@ -3,18 +3,17 @@
 Run once from the project root:  python -m app.seed
 (or: .venv/bin/python -m app.seed)
 
-Creates:
-  admin / admin123            (moderator account — use this to try the admin view)
-  krzy_budz / budz123         (Brad)
-  queenshida / shida123       (Shida)
-  powme0wpow / pow123
-  hoodzwtf / hood123          (avatar uploaded but NOT approved -> shows in mod queue)
+Creates demo accounts (admin, krzy_budz, queenshida, powme0wpow, hoodzwtf).
+Passwords are randomly generated at seed time and printed ONCE to the
+console — save them if you need them. They are development-only: change
+them immediately and never use seed accounts in production.
 
 Plus follows, posts, likes, comments, a DM thread, a grow-journal entry and
 one open report. Safe to re-run: it does nothing if the admin user exists.
 """
 import asyncio
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 
 import aiosqlite
@@ -24,12 +23,14 @@ from .auth import hash_password
 from .db import AVATAR_DIR, DB_PATH, SCHEMA, _migrate, avatar_path_for
 
 USERS = [
-    # username, password, display_name, twitch, bio, admin, avatar_approved
-    ("admin", "admin123", "Club Mod", "", "Keeping the club green and clean.", True, False),
-    ("krzy_budz", "budz123", "KRZY BUDZ", "krzy_budz", "Streamer. Budtender. Your host. 🌿", False, True),
-    ("queenshida", "shida123", "Queen Shida", "queenshida", "👑 Queen of the club.", False, True),
-    ("powme0wpow", "pow123", "Pow Meow Pow", "powme0wpow", "Here for the vibes and the parlays.", False, True),
-    ("hoodzwtf", "hood123", "Hoodz WTF", "hoodzwtf", "Lurker turned poster.", False, False),
+    # username, display_name, twitch, bio, admin, avatar_approved
+    # NOTE: demo passwords are randomly generated at seed time (see below)
+    # and printed once — they are never stored in this file.
+    ("admin", "Club Mod", "", "Keeping the club green and clean.", True, False),
+    ("krzy_budz", "KRZY BUDZ", "krzy_budz", "Streamer. Budtender. Your host. 🌿", False, True),
+    ("queenshida", "Queen Shida", "queenshida", "👑 Queen of the club.", False, True),
+    ("powme0wpow", "Pow Meow Pow", "powme0wpow", "Here for the vibes and the parlays.", False, True),
+    ("hoodzwtf", "Hoodz WTF", "hoodzwtf", "Lurker turned poster.", False, False),
 ]
 
 POSTS = [
@@ -152,7 +153,10 @@ async def main() -> None:
             return
         now = datetime.now(timezone.utc)
         ids = {}
-        for i, (uname, pw, disp, twitch, bio, admin, approved) in enumerate(USERS):
+        creds = []
+        for i, (uname, disp, twitch, bio, admin, approved) in enumerate(USERS):
+            pw = secrets.token_urlsafe(12)  # dev-only; printed once below
+            creds.append((uname, pw))
             await db.execute(
                 """INSERT INTO users (username, display_name, password_hash, bio,
                                       twitch_username, avatar_approved, is_admin, created_at)
@@ -164,6 +168,9 @@ async def main() -> None:
             if uname != "admin":
                 make_avatar(uname, AVATAR_COLORS[i % len(AVATAR_COLORS)], disp[0])
         await db.commit()
+        print("Seed: demo logins (DEV ONLY — change these passwords immediately):")
+        for _u, _p in creds:
+            print(f"  {_u} / {_p}")
 
         post_ids = []
         for uname, body, kind, mins_ago in POSTS:
@@ -205,8 +212,8 @@ async def main() -> None:
              now.isoformat()))
         await db.commit()
         print(f"Seed: {len(USERS)} users, {len(POSTS)} posts, demo content ready.")
-        print("Admin login: admin / admin123")
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+
