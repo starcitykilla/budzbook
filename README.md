@@ -16,15 +16,16 @@ cd thc-social
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# seed demo users + posts (admin / admin123)
+# seed demo users + posts (random dev passwords printed once — see app/seed.py)
 python -m app.seed
 
 # start the server
 uvicorn app.main:app
 ```
 
-Open http://127.0.0.1:8000 — you'll land on the welcome page. Log in as
-**admin / admin123** to try the mod tools (avatar approvals + reports).
+Open http://127.0.0.1:8000 — you'll land on the welcome page. Log in with the
+demo moderator account (credentials printed when you ran the seed step) to try
+the mod tools (avatar approvals + reports).
 
 Run the tests:
 
@@ -106,3 +107,4 @@ thc-social/
 - Full-text search, hashtags, trending
 - Mobile apps — intentionally not planned; web-first dodges app-store issues
   with cannabis content
+
